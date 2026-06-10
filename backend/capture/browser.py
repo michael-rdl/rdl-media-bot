@@ -101,36 +101,20 @@ def _wait_for_scene_ready(page):
 
 
 def _stitch_frames(frames_dir: Path, output_path: Path):
-    """Stitch frames into a smooth MP4, interpolating up to 30fps."""
+    """Stitch frames into MP4."""
     cmd = [
         "ffmpeg", "-y",
         "-framerate", str(TARGET_FPS),
         "-i", str(frames_dir / "f_%06d.png"),
-        "-vf", f"minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir,setpts=N/30/TB",
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "20",
         "-pix_fmt", "yuv420p",
         str(output_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if result.returncode != 0:
-        # Fallback without interpolation
-        logger.warning("Interpolation failed, stitching without it")
-        cmd2 = [
-            "ffmpeg", "-y",
-            "-framerate", str(TARGET_FPS),
-            "-i", str(frames_dir / "f_%06d.png"),
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "20",
-            "-pix_fmt", "yuv420p",
-            "-r", "30",
-            str(output_path),
-        ]
-        result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=300)
-        if result2.returncode != 0:
-            raise RuntimeError(f"ffmpeg failed: {result2.stderr[:500]}")
+        raise RuntimeError(f"ffmpeg failed: {result.stderr[:500]}")
 
 
 def _authenticate(page, base_url):
