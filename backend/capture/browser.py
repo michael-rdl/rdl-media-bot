@@ -7,8 +7,8 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-VIEWPORT = {"width": 1080, "height": 1920}
-TARGET_FPS = 10
+VIEWPORT = {"width": 720, "height": 1280}
+TARGET_FPS = 5
 
 
 def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> Path:
