@@ -100,8 +100,8 @@ CELERY_TIMEZONE = TIME_ZONE
 RDL_BASE_URL = os.environ.get("RDL_BASE_URL", "https://fd.racedatalabs.com")
 RDL_BASE_API_URL = os.environ.get("RDL_BASE_API_URL", "https://fd.racedatalabs.com/api/v1")
 RDL_INTERNAL_API_KEY = os.environ.get("RDL_INTERNAL_API_KEY", "")
-RDL_API_USERNAME = os.environ.get("RDL_API_USERNAME", "")
-RDL_API_PASSWORD = os.environ.get("RDL_API_PASSWORD", "")
+RDL_API_USERNAME = os.environ.get("RDL_API_USERNAME", "rdl-media@racedatalabs.com")
+RDL_API_PASSWORD = os.environ.get("RDL_API_PASSWORD", "n2knuFYsu2rWvf")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 
 # --- Instagram ---
