@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+
 cd "$(dirname "$0")"
 
 check_and_deploy() {
