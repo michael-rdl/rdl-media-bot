@@ -8,13 +8,14 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_VIEWPORT = {"width": 1920, "height": 1080}
 SCENE_LOAD_SELECTOR = "canvas"
-SCENE_LOAD_TIMEOUT_MS = 30_000
+SCENE_LOAD_TIMEOUT_MS = 60_000
 
 
 def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> Path:
     """
     Launch a headless Chromium browser, authenticate with rdl-base,
-    navigate to the visualiser replay page, and record it as video.
+    navigate to the visualiser replay page, wait for it to fully load,
+    then start a fresh recording of just the replay.
     """
     from playwright.sync_api import sync_playwright
 
@@ -35,32 +36,54 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
             ],
         )
 
-        context = browser.new_context(
-            viewport=DEFAULT_VIEWPORT,
-            record_video_dir=str(output_path.parent),
-            record_video_size=DEFAULT_VIEWPORT,
-        )
-
-        page = context.new_page()
+        # Phase 1: authenticate and load the scene (no recording yet)
+        setup_context = browser.new_context(viewport=DEFAULT_VIEWPORT)
+        page = setup_context.new_page()
 
         _authenticate(page, base_url)
 
+        logger.info("Navigating to replay and waiting for scene to load...")
         page.goto(replay_url, wait_until="networkidle")
 
         try:
             page.wait_for_selector(SCENE_LOAD_SELECTOR, timeout=SCENE_LOAD_TIMEOUT_MS)
-            logger.info("Canvas element found, scene is loading")
+            logger.info("Canvas found, waiting for scene to initialize...")
         except Exception:
-            logger.warning("Canvas selector not found within timeout, proceeding anyway")
+            logger.warning("Canvas not found within timeout, proceeding anyway")
 
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(5000)
+
+        # Grab cookies so we can transfer auth to the recording context
+        cookies = setup_context.cookies()
+        setup_context.close()
+
+        # Phase 2: fresh context with recording enabled, already authenticated
+        record_context = browser.new_context(
+            viewport=DEFAULT_VIEWPORT,
+            record_video_dir=str(output_path.parent),
+            record_video_size=DEFAULT_VIEWPORT,
+        )
+        record_context.add_cookies(cookies)
+
+        record_page = record_context.new_page()
+
+        logger.info("Starting recording...")
+        record_page.goto(replay_url, wait_until="networkidle")
+
+        try:
+            record_page.wait_for_selector(SCENE_LOAD_SELECTOR, timeout=SCENE_LOAD_TIMEOUT_MS)
+        except Exception:
+            pass
+
+        # Wait for the scene to start rendering
+        record_page.wait_for_timeout(3000)
 
         record_time = duration_seconds + 2.0
         logger.info("Recording for %.1f seconds", record_time)
         time.sleep(record_time)
 
-        page.close()
-        context.close()
+        record_page.close()
+        record_context.close()
         browser.close()
 
     video_files = list(output_path.parent.glob("*.webm"))
@@ -90,17 +113,14 @@ def _authenticate(page, base_url):
         return
 
     if api_key:
-        logger.info("Using internal API key -- visualiser may not need auth")
         return
 
     login_url = f"{base_url}/api/v1/auth/login/"
-    logger.info("Authenticating browser session at %s", login_url)
+    logger.info("Authenticating browser session...")
 
-    # Navigate to the base URL first to set the origin for cookies
     page.goto(base_url, wait_until="domcontentloaded")
     page.wait_for_timeout(1000)
 
-    # POST to the login API via the browser to get session cookies
     result = page.evaluate(
         """async ([url, email, password]) => {
             try {
