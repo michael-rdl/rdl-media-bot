@@ -25,8 +25,8 @@ check_and_deploy() {
             docker compose down
             docker compose up -d
         else
-            echo "$(date): Code-only change, restarting containers..."
-            docker compose restart backend celery-worker celery-beat
+            echo "$(date): Code-only change, recreating workers..."
+            docker compose up -d --force-recreate --no-build
         fi
 
         echo "$(date): Deploy complete"
