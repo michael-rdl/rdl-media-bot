@@ -25,6 +25,7 @@ services:
       - "${BACKEND_PORT:-8000}:8000"
     env_file: .env
     volumes:
+      - ./backend:/app
       - media_data:/app/media
 
   celery-worker:
@@ -36,6 +37,7 @@ services:
       - redis
     env_file: .env
     volumes:
+      - ./backend:/app
       - media_data:/app/media
 
   celery-beat:
@@ -45,6 +47,8 @@ services:
     depends_on:
       - redis
     env_file: .env
+    volumes:
+      - ./backend:/app
 
 volumes:
   db_data:
