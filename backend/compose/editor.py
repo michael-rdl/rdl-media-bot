@@ -51,7 +51,7 @@ def compose_story_video(
     cmd.extend([
         "-c:v", "libx264",
         "-preset", "fast",
-        "-crf", "20",
+        "-crf", "15",
         "-pix_fmt", "yuv420p",
         "-r", "30",
         str(output_path),

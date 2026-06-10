@@ -100,7 +100,7 @@ def _trim_and_convert(input_path: Path, output_path: Path, trim_start: float):
         "-i", str(input_path),
         "-c:v", "libx264",
         "-preset", "fast",
-        "-crf", "20",
+        "-crf", "15",
         "-pix_fmt", "yuv420p",
         "-r", "30",
         "-an",
