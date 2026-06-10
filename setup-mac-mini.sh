@@ -90,13 +90,11 @@ else
     cd "$REPO_DIR"
 fi
 
-# Create .env from example if it doesn't exist
-if [ ! -f "$REPO_DIR/.env" ]; then
+# Create or refresh .env
+if [ ! -f "$REPO_DIR/.env" ] || grep -q "host='nginx'" "$REPO_DIR/.env" 2>/dev/null || grep -q "RDL_BASE_URL=http://nginx" "$REPO_DIR/.env" 2>/dev/null; then
     cp "$REPO_DIR/.env.example" "$REPO_DIR/.env"
     echo ""
     echo "  Created .env from .env.example"
-    echo "  *** IMPORTANT: Edit ~/rdl-media-bot/.env with your credentials ***"
-    echo "  nano ~/rdl-media-bot/.env"
     echo ""
 fi
 
