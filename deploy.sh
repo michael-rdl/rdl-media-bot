@@ -33,8 +33,8 @@ check_and_deploy() {
     fi
 }
 
-echo "$(date): Deploy watcher started (checking every 30s)"
+echo "$(date): Deploy watcher started (checking every 5s)"
 while true; do
     check_and_deploy
-    sleep 30
+    sleep 5
 done
