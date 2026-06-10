@@ -8,8 +8,6 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 VIEWPORT = {"width": 1080, "height": 1920}
-SCENE_LOAD_TIMEOUT_MS = 60_000
-LOADER_GONE_TIMEOUT_MS = 60_000
 TARGET_FPS = 30
 
 
@@ -36,45 +34,53 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
                 "--no-sandbox",
                 "--disable-gpu",
                 "--disable-dev-shm-usage",
-                "--disable-software-rasterizer",
             ],
         )
 
         context = browser.new_context(viewport=VIEWPORT)
         page = context.new_page()
 
+        # Step 1: Authenticate via the login API
         _authenticate(page, base_url)
 
+        # Step 2: Navigate to the replay page
         logger.info("Navigating to replay...")
         page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
 
-        # Wait for canvas to appear
+        # Step 3: Wait for auth check to pass (the app calls /api/v1/auth/me/)
+        # If auth works, it sets ready=true and renders the app with #loader
+        # If auth fails, it redirects to /rdl/login
+        logger.info("Waiting for app to pass auth check...")
         try:
-            page.wait_for_selector("canvas", timeout=SCENE_LOAD_TIMEOUT_MS)
-            logger.info("Canvas found")
+            page.wait_for_selector("#loader", timeout=30_000)
+            logger.info("App loaded (auth passed), waiting for scene data...")
         except Exception:
-            logger.warning("Canvas not found within timeout")
+            # Check if we got redirected to login
+            if "/login" in page.url:
+                logger.error("Redirected to login page at %s", page.url)
+                raise RuntimeError("Auth failed - visualiser redirected to login page")
+            logger.warning("#loader not found, proceeding anyway")
 
-        # Wait for the loading modal to disappear
-        logger.info("Waiting for loader to finish...")
+        # Step 4: Wait for the scene loader to disappear
+        logger.info("Waiting for scene to finish loading...")
         try:
             page.wait_for_function(
                 """() => {
                     const loader = document.getElementById('loader');
-                    if (!loader) return true;
-                    return loader.style.display === 'none' || 
+                    if (!loader) return false;
+                    return loader.style.display === 'none' ||
                            getComputedStyle(loader).display === 'none';
                 }""",
-                timeout=LOADER_GONE_TIMEOUT_MS,
+                timeout=90_000,
             )
-            logger.info("Loader gone, scene is ready")
+            logger.info("Scene loaded, ready to capture")
         except Exception:
-            logger.warning("Loader didn't disappear within timeout, proceeding anyway")
+            logger.warning("Loader still visible after timeout, capturing anyway")
 
-        # Extra time for scene to settle and start animating
+        # Step 5: Let the scene settle
         page.wait_for_timeout(2000)
 
-        # Capture frames as screenshots
+        # Step 6: Capture frames as screenshots
         frame_interval = 1.0 / TARGET_FPS
         total_frames = int(duration_seconds * TARGET_FPS)
         logger.info("Capturing %d frames at %d fps...", total_frames, TARGET_FPS)
@@ -90,7 +96,7 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
         context.close()
         browser.close()
 
-    # Stitch frames into video with ffmpeg
+    # Step 7: Stitch frames into video with ffmpeg
     _stitch_frames(frames_dir, output_path, TARGET_FPS)
 
     # Clean up frames
@@ -122,7 +128,10 @@ def _stitch_frames(frames_dir: Path, output_path: Path, fps: int):
 
 
 def _authenticate(page, base_url):
-    """Log into rdl-base via the API so the browser session has auth cookies."""
+    """
+    Log into rdl-base via the login API. The visualiser's auth check
+    calls /api/v1/auth/me/ -- the session cookie from login satisfies this.
+    """
     email = getattr(settings, "RDL_API_USERNAME", "")
     password = getattr(settings, "RDL_API_PASSWORD", "")
 
@@ -131,11 +140,14 @@ def _authenticate(page, base_url):
         return
 
     login_url = f"{base_url}/api/v1/auth/login/"
-    logger.info("Authenticating browser session...")
 
-    page.goto(base_url, wait_until="domcontentloaded", timeout=30_000)
-    page.wait_for_timeout(1000)
+    # Go to the base URL first so cookies are set on the right domain
+    logger.info("Loading base URL for cookie domain...")
+    page.goto(f"{base_url}/rdl/login", wait_until="domcontentloaded", timeout=30_000)
+    page.wait_for_timeout(2000)
 
+    # Use the browser's fetch to call the login API (sets session cookie)
+    logger.info("Logging in as %s...", email)
     result = page.evaluate(
         """async ([url, email, password]) => {
             try {
@@ -145,7 +157,8 @@ def _authenticate(page, base_url):
                     body: JSON.stringify({email, password}),
                     credentials: 'include',
                 });
-                return {status: resp.status, ok: resp.ok};
+                const text = await resp.text();
+                return {status: resp.status, ok: resp.ok, body: text.substring(0, 200)};
             } catch (e) {
                 return {status: 0, error: e.message};
             }
@@ -157,3 +170,17 @@ def _authenticate(page, base_url):
         logger.info("Browser authenticated successfully")
     else:
         logger.error("Browser login failed: %s", result)
+
+    # Verify auth works by checking /api/v1/auth/me/
+    me_result = page.evaluate(
+        """async (url) => {
+            try {
+                const resp = await fetch(url, {credentials: 'include'});
+                return {status: resp.status, ok: resp.ok};
+            } catch (e) {
+                return {status: 0, error: e.message};
+            }
+        }""",
+        f"{base_url}/api/v1/auth/me/",
+    )
+    logger.info("Auth verify /me/: %s", me_result)
