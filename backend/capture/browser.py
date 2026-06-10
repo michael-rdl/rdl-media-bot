@@ -9,15 +9,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_VIEWPORT = {"width": 1920, "height": 1080}
 SCENE_LOAD_SELECTOR = "canvas"
 SCENE_LOAD_TIMEOUT_MS = 30_000
-PLAYBACK_POLL_INTERVAL = 1.0
 
 
 def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> Path:
     """
-    Launch a headless Chromium browser, navigate to the rdl-base visualiser
-    replay page for the given run, and record the viewport as an MP4.
-
-    Returns the path to the recorded video file.
+    Launch a headless Chromium browser, authenticate with rdl-base,
+    navigate to the visualiser replay page, and record it as video.
     """
     from playwright.sync_api import sync_playwright
 
@@ -46,6 +43,8 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
 
         page = context.new_page()
 
+        _authenticate(page, base_url)
+
         page.goto(replay_url, wait_until="networkidle")
 
         try:
@@ -54,7 +53,6 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
         except Exception:
             logger.warning("Canvas selector not found within timeout, proceeding anyway")
 
-        # Allow the Three.js scene to fully initialize and start playback
         page.wait_for_timeout(3000)
 
         record_time = duration_seconds + 2.0
@@ -79,6 +77,51 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
 
     logger.info("Capture saved to %s", output_path)
     return output_path
+
+
+def _authenticate(page, base_url):
+    """Log into rdl-base via the API so the browser session has auth cookies."""
+    email = getattr(settings, "RDL_API_USERNAME", "")
+    password = getattr(settings, "RDL_API_PASSWORD", "")
+    api_key = getattr(settings, "RDL_INTERNAL_API_KEY", "")
+
+    if not email and not api_key:
+        logger.warning("No auth credentials for visualiser capture")
+        return
+
+    if api_key:
+        logger.info("Using internal API key -- visualiser may not need auth")
+        return
+
+    login_url = f"{base_url}/api/v1/auth/login/"
+    logger.info("Authenticating browser session at %s", login_url)
+
+    # Navigate to the base URL first to set the origin for cookies
+    page.goto(base_url, wait_until="domcontentloaded")
+    page.wait_for_timeout(1000)
+
+    # POST to the login API via the browser to get session cookies
+    result = page.evaluate(
+        """async ([url, email, password]) => {
+            try {
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({email, password}),
+                    credentials: 'include',
+                });
+                return {status: resp.status, ok: resp.ok};
+            } catch (e) {
+                return {status: 0, error: e.message};
+            }
+        }""",
+        [login_url, email, password],
+    )
+
+    if result.get("ok"):
+        logger.info("Browser authenticated successfully")
+    else:
+        logger.error("Browser login failed: %s", result)
 
 
 def _convert_webm_to_mp4(input_path: Path, output_path: Path):
