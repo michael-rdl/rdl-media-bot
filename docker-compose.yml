@@ -2,6 +2,8 @@ services:
   db:
     image: postgis/postgis:15-3.4-alpine
     restart: unless-stopped
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_DB: ${DB_NAME:-media_bot}
       POSTGRES_USER: ${DB_USER:-postgres}
@@ -12,46 +14,11 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    ports:
+      - "6379:6379"
     volumes:
       - redis_data:/data
-
-  backend:
-    build: .
-    restart: unless-stopped
-    command: python manage.py runserver 0.0.0.0:8000
-    depends_on:
-      - db
-      - redis
-    ports:
-      - "${BACKEND_PORT:-80}:8000"
-    env_file: .env
-    volumes:
-      - ./backend:/app
-      - media_data:/app/media
-
-  celery-worker:
-    build: .
-    restart: unless-stopped
-    command: celery -A media_bot worker -l info -c 2 --max-tasks-per-child=10
-    depends_on:
-      - db
-      - redis
-    env_file: .env
-    volumes:
-      - ./backend:/app
-      - media_data:/app/media
-
-  celery-beat:
-    build: .
-    restart: unless-stopped
-    command: celery -A media_bot beat -l info --schedule=/tmp/celerybeat-schedule
-    depends_on:
-      - redis
-    env_file: .env
-    volumes:
-      - ./backend:/app
 
 volumes:
   db_data:
   redis_data:
-  media_data:

@@ -1,11 +1,9 @@
 #!/bin/bash
 #
-# RDL Media Bot -- Mac Mini Setup Script
+# RDL Media Bot -- Mac Mini Setup (Native)
 #
-# Run this directly on the Mac Mini:
+# Run on the Mac Mini:
 #   curl -fsSL https://raw.githubusercontent.com/michael-rdl/rdl-media-bot/main/setup-mac-mini.sh | bash
-#
-# Or copy this file over and run: bash setup-mac-mini.sh
 #
 set -e
 
@@ -13,76 +11,41 @@ echo "========================================="
 echo "  RDL Media Bot - Mac Mini Setup"
 echo "========================================="
 
-# ---- 1. Enable SSH (Remote Login) ----
-echo ""
-echo "[1/6] Enabling SSH (Remote Login)..."
-sudo systemsetup -setremotelogin on 2>/dev/null || echo "  SSH may already be enabled or requires System Settings"
-echo "  SSH enabled. You can now access this machine via: ssh $(whoami)@$(hostname)"
+REPO_DIR="$HOME/rdl-media-bot"
 
-# ---- 2. Install Homebrew (if not present) ----
+# ---- 1. Homebrew ----
 echo ""
-echo "[2/6] Checking Homebrew..."
+echo "[1/7] Checking Homebrew..."
 if ! command -v brew &>/dev/null; then
     echo "  Installing Homebrew..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
     eval "$(/opt/homebrew/bin/brew shellenv)"
 else
-    echo "  Homebrew already installed"
+    echo "  Already installed"
 fi
 
-# ---- 3. Install Tailscale (remote access from anywhere) ----
+# ---- 2. System deps ----
 echo ""
-echo "[3/6] Installing Tailscale for remote access..."
-if ! command -v tailscale &>/dev/null; then
-    brew install --cask tailscale
-    echo ""
-    echo "  *** IMPORTANT: Open Tailscale from Applications and sign in ***"
-    echo "  After signing in, you can SSH from anywhere using your Tailscale IP."
-    echo "  Install Tailscale on your other machines too: https://tailscale.com/download"
-    echo ""
-    echo "  Press ENTER after you've signed into Tailscale..."
-    read -r
-else
-    echo "  Tailscale already installed"
-fi
+echo "[2/7] Installing system dependencies..."
+brew install ffmpeg python@3.11 git 2>/dev/null || true
+pip3.11 install --upgrade pip 2>/dev/null || true
 
-# Show Tailscale IP if connected
-if command -v tailscale &>/dev/null; then
-    TS_IP=$(tailscale ip -4 2>/dev/null || echo "not connected yet")
-    echo "  Tailscale IP: $TS_IP"
-    echo "  SSH from anywhere: ssh $(whoami)@$TS_IP"
-fi
-
-# ---- 4. Install Docker ----
+# ---- 3. Docker (for PostGIS + Redis only) ----
 echo ""
-echo "[4/6] Checking Docker..."
+echo "[3/7] Checking Docker..."
 if ! command -v docker &>/dev/null; then
     echo "  Installing Docker Desktop..."
     brew install --cask docker
-    echo ""
-    echo "  *** IMPORTANT: Open Docker Desktop from Applications and complete setup ***"
-    echo "  Press ENTER after Docker Desktop is running..."
-    read -r
-else
-    echo "  Docker already installed"
-fi
-
-# Verify Docker is running
-if ! docker info &>/dev/null; then
-    echo "  Waiting for Docker to start..."
-    echo "  Please open Docker Desktop if it's not running."
-    echo "  Press ENTER when Docker is ready..."
+    echo "  *** Open Docker Desktop from Applications and complete setup ***"
+    echo "  Press ENTER when Docker is running..."
     read -r
 fi
-echo "  Docker is running: $(docker --version)"
 
-# ---- 5. Clone the repo ----
+# ---- 4. Clone repo ----
 echo ""
-echo "[5/6] Cloning rdl-media-bot..."
-REPO_DIR="$HOME/rdl-media-bot"
+echo "[4/7] Setting up repository..."
 if [ -d "$REPO_DIR" ]; then
-    echo "  Directory exists, pulling latest..."
     cd "$REPO_DIR"
     git pull origin main
 else
@@ -90,71 +53,84 @@ else
     cd "$REPO_DIR"
 fi
 
-# Create or refresh .env
-if [ ! -f "$REPO_DIR/.env" ] || grep -q "host='nginx'" "$REPO_DIR/.env" 2>/dev/null || grep -q "RDL_BASE_URL=http://nginx" "$REPO_DIR/.env" 2>/dev/null; then
-    cp "$REPO_DIR/.env.example" "$REPO_DIR/.env"
-    echo ""
-    echo "  Created .env from .env.example"
-    echo ""
-fi
-
-# ---- 6. Set up auto-deploy watcher ----
+# ---- 5. Python venv + deps ----
 echo ""
-echo "[6/6] Setting up auto-deploy watcher..."
+echo "[5/7] Setting up Python environment..."
+if [ ! -d "$REPO_DIR/venv" ]; then
+    python3.11 -m venv "$REPO_DIR/venv"
+fi
+source "$REPO_DIR/venv/bin/activate"
+pip install -r "$REPO_DIR/backend/requirements.txt"
 
-# Remove old cron entry if present
-(crontab -l 2>/dev/null | grep -v "rdl-media-bot/deploy.sh") | crontab - 2>/dev/null || true
+# Install Playwright + Chromium with GPU support
+playwright install chromium
 
-# Create launchd plist for the deploy watcher
-PLIST_PATH="$HOME/Library/LaunchAgents/com.rdl.media-bot-deploy.plist"
-mkdir -p "$HOME/Library/LaunchAgents"
-cat > "$PLIST_PATH" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.rdl.media-bot-deploy</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>${REPO_DIR}/deploy.sh</string>
-    </array>
-    <key>StandardOutPath</key>
-    <string>${REPO_DIR}/deploy.log</string>
-    <key>StandardErrorPath</key>
-    <string>${REPO_DIR}/deploy.log</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-</dict>
-</plist>
-PLIST
+# Install yt-dlp
+pip install yt-dlp
 
-launchctl unload "$PLIST_PATH" 2>/dev/null || true
-launchctl load "$PLIST_PATH"
-echo "  Deploy watcher running (checks every 30 seconds)"
+# ---- 6. Start databases ----
+echo ""
+echo "[6/7] Starting PostGIS + Redis..."
+cd "$REPO_DIR"
+docker compose up -d
 
-# ---- Done ----
+# Wait for PostGIS to be ready
+echo "  Waiting for PostGIS..."
+sleep 5
+
+# Create database if needed
+docker compose exec -T db psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'media_bot'" | grep -q 1 || \
+    docker compose exec -T db psql -U postgres -c "CREATE DATABASE media_bot;"
+docker compose exec -T db psql -U postgres -d media_bot -c "CREATE EXTENSION IF NOT EXISTS postgis;" 2>/dev/null || true
+
+# Run migrations
+cd "$REPO_DIR/backend"
+python manage.py migrate
+
+# ---- 7. Set up services ----
+echo ""
+echo "[7/7] Setting up auto-start services..."
+
+# Create the run script
+cat > "$REPO_DIR/run.sh" << 'RUNEOF'
+#!/bin/bash
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+cd "$(dirname "$0")"
+source venv/bin/activate
+cd backend
+
+# Start Django dev server
+python manage.py runserver 0.0.0.0:80 &
+DJANGO_PID=$!
+
+# Start Celery worker with auto-reload
+watchmedo auto-restart --directory=. --pattern='*.py' --recursive -- \
+    celery -A media_bot worker -l info -c 2 &
+CELERY_PID=$!
+
+echo "Django PID: $DJANGO_PID"
+echo "Celery PID: $CELERY_PID"
+echo "Dashboard: http://$(hostname):80"
+
+trap "kill $DJANGO_PID $CELERY_PID 2>/dev/null" EXIT
+wait
+RUNEOF
+chmod +x "$REPO_DIR/run.sh"
+
+# Install watchdog for celery auto-reload
+pip install watchdog[watchmedo]
+
 echo ""
 echo "========================================="
 echo "  Setup Complete!"
 echo "========================================="
 echo ""
-echo "  Next steps:"
-echo "  1. Edit credentials:  nano ~/rdl-media-bot/.env"
-echo "  2. First run:         cd ~/rdl-media-bot && docker compose up -d --build"
-echo "  3. Run migrations:    docker compose exec backend python manage.py migrate"
-echo "  4. Create admin user: docker compose exec backend python manage.py createsuperuser"
+echo "  To start everything:"
+echo "    cd ~/rdl-media-bot && sudo ./run.sh"
 echo ""
-if command -v tailscale &>/dev/null; then
-    TS_IP=$(tailscale ip -4 2>/dev/null || echo "<tailscale-ip>")
-    echo "  Dashboard:  http://$TS_IP:8001"
-    echo "  SSH access: ssh $(whoami)@$TS_IP"
-else
-    echo "  Dashboard:  http://$(hostname -I 2>/dev/null || hostname):8001"
-fi
+echo "  Dashboard: http://$(hostname):80"
 echo ""
-echo "  Auto-deploy is active. Push to GitHub and the Mac Mini"
-echo "  will pull and rebuild within 60 seconds."
+echo "  The deploy watcher auto-pulls code changes."
+echo "  Django auto-reloads on code changes."
+echo "  Celery auto-restarts on code changes."
 echo ""
