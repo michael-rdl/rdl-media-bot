@@ -1,0 +1,61 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Jobs - RDL Media Bot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Jobs</h2>
+    <p>Content pipeline jobs triggered from rdl-base run completions</p>
+</hgroup>
+
+<div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+    <a href="{% url 'dashboard:job-list' %}" role="button" class="{% if not current_status %}primary{% else %}secondary outline{% endif %}" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">All</a>
+    {% for value, label in statuses %}
+    <a href="?status={{ value }}" role="button" class="{% if current_status == value %}primary{% else %}secondary outline{% endif %}" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">{{ label }}</a>
+    {% endfor %}
+</div>
+
+{% if jobs %}
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Driver</th>
+            <th>Run</th>
+            <th>Status</th>
+            <th>Pipeline</th>
+            <th>Created</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for job in jobs %}
+        <tr>
+            <td>{{ job.id }}</td>
+            <td>{{ job.driver_name|default:"-" }}</td>
+            <td>{{ job.run_number|default:"-" }}</td>
+            <td><span class="status-badge status-{{ job.status }}">{{ job.get_status_display }}</span></td>
+            <td>
+                <div class="pipeline-stages">
+                    {% with stages="triggered,capturing,clipping,composing,publishing,done" %}
+                    {% for stage in stages|make_list %}
+                    {% endfor %}
+                    {% endwith %}
+                    <span class="pipeline-stage {% if job.status == 'capturing' %}active{% elif job.status == 'clipping' or job.status == 'composing' or job.status == 'publishing' or job.status == 'done' %}complete{% endif %}">Cap</span>
+                    <span class="pipeline-stage {% if job.status == 'clipping' %}active{% elif job.status == 'composing' or job.status == 'publishing' or job.status == 'done' %}complete{% endif %}">Clip</span>
+                    <span class="pipeline-stage {% if job.status == 'composing' %}active{% elif job.status == 'publishing' or job.status == 'done' %}complete{% endif %}">Mix</span>
+                    <span class="pipeline-stage {% if job.status == 'publishing' %}active{% elif job.status == 'done' %}complete{% endif %}">Pub</span>
+                    {% if job.status == 'failed' %}<span class="pipeline-stage failed">!</span>{% endif %}
+                </div>
+            </td>
+            <td>{{ job.created_at|date:"M d, H:i" }}</td>
+            <td><a href="{% url 'dashboard:job-detail' job.id %}">View</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p>No jobs found. <a href="{% url 'dashboard:job-create' %}">Create one manually</a> or configure a webhook from rdl-base.</p>
+{% endif %}
+{% endblock %}

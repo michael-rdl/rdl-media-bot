@@ -1,0 +1,107 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Job #{{ job.id }} - RDL Media Bot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Job #{{ job.id }}</h2>
+    <p>{{ job.driver_name|default:"Unknown Driver" }} &mdash; Run {{ job.run_number|default:"?" }}</p>
+</hgroup>
+
+<div style="display: flex; gap: 2rem; flex-wrap: wrap; margin-bottom: 2rem;">
+    <article style="flex: 1; min-width: 300px;">
+        <header>Details</header>
+        <table>
+            <tr><td><strong>Status</strong></td><td><span class="status-badge status-{{ job.status }}">{{ job.get_status_display }}</span></td></tr>
+            <tr><td><strong>rdl-base Run ID</strong></td><td>{{ job.rdl_run_id }}</td></tr>
+            <tr><td><strong>Driver</strong></td><td>{{ job.driver_name|default:"-" }}</td></tr>
+            <tr><td><strong>Run Number</strong></td><td>{{ job.run_number|default:"-" }}</td></tr>
+            <tr><td><strong>Stream Source</strong></td><td>{{ job.stream_source|default:"None" }}</td></tr>
+            <tr><td><strong>Template</strong></td><td>{{ job.template|default:"Default" }}</td></tr>
+            <tr><td><strong>Publish As</strong></td><td>{% if job.publish_as_reel %}Reel{% else %}Story{% endif %}</td></tr>
+            <tr><td><strong>Created</strong></td><td>{{ job.created_at|date:"M d, Y H:i:s" }}</td></tr>
+            <tr><td><strong>Updated</strong></td><td>{{ job.updated_at|date:"M d, Y H:i:s" }}</td></tr>
+        </table>
+
+        {% if job.status == "failed" %}
+        <article style="border-left: 4px solid #dc3545; padding-left: 1rem; background: #f8d7da;">
+            <strong>Failed at stage: {{ job.failed_stage }}</strong>
+            <pre style="white-space: pre-wrap; font-size: 0.8rem;">{{ job.error_message }}</pre>
+            <form method="post" action="{% url 'dashboard:job-retry' job.id %}">
+                {% csrf_token %}
+                <button type="submit">Retry Pipeline</button>
+            </form>
+        </article>
+        {% endif %}
+    </article>
+
+    <article style="flex: 1; min-width: 300px;">
+        <header>Pipeline Progress</header>
+        <div class="pipeline-stages" style="flex-direction: column; align-items: stretch; gap: 0.5rem;">
+            {% with current=job.status %}
+            <div class="pipeline-stage {% if current == 'triggered' %}active{% elif current != 'triggered' %}complete{% endif %}" style="padding: 0.5rem;">Triggered</div>
+            <div class="pipeline-stage {% if current == 'capturing' %}active{% elif current == 'clipping' or current == 'composing' or current == 'publishing' or current == 'done' %}complete{% elif current == 'failed' and job.failed_stage == 'capture' %}failed{% endif %}" style="padding: 0.5rem;">Capturing Visualiser</div>
+            <div class="pipeline-stage {% if current == 'clipping' %}active{% elif current == 'composing' or current == 'publishing' or current == 'done' %}complete{% elif current == 'failed' and job.failed_stage == 'clip' %}failed{% endif %}" style="padding: 0.5rem;">Clipping Stream</div>
+            <div class="pipeline-stage {% if current == 'composing' %}active{% elif current == 'publishing' or current == 'done' %}complete{% elif current == 'failed' and job.failed_stage == 'compose' %}failed{% endif %}" style="padding: 0.5rem;">Composing Story</div>
+            <div class="pipeline-stage {% if current == 'publishing' %}active{% elif current == 'done' %}complete{% elif current == 'failed' and job.failed_stage == 'publish' %}failed{% endif %}" style="padding: 0.5rem;">Publishing</div>
+            <div class="pipeline-stage {% if current == 'done' %}complete{% endif %}" style="padding: 0.5rem;">Done</div>
+            {% endwith %}
+        </div>
+    </article>
+</div>
+
+<h3>Content Pieces</h3>
+{% if pieces %}
+{% for piece in pieces %}
+<article>
+    <header>
+        <strong>{{ piece.get_piece_type_display }}</strong>
+        {% if piece.duration_seconds %} &mdash; {{ piece.duration_seconds|floatformat:1 }}s{% endif %}
+        {% if piece.width and piece.height %} &mdash; {{ piece.width }}x{{ piece.height }}{% endif %}
+    </header>
+
+    {% if piece.file %}
+        {% if "video" in piece.mime_type %}
+        <video controls class="content-preview">
+            <source src="{{ piece.file.url }}" type="{{ piece.mime_type }}">
+        </video>
+        {% elif "audio" in piece.mime_type %}
+        <audio controls>
+            <source src="{{ piece.file.url }}" type="{{ piece.mime_type }}">
+        </audio>
+        {% endif %}
+    {% endif %}
+
+    {% if piece.publish_results.all %}
+    <h4 style="margin-top: 1rem;">Publish Results</h4>
+    <table>
+        <thead>
+            <tr>
+                <th>Platform</th>
+                <th>Status</th>
+                <th>URL</th>
+                <th>Published</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for pr in piece.publish_results.all %}
+            <tr>
+                <td>{{ pr.get_platform_display }}</td>
+                <td><span class="status-badge status-{% if pr.status == 'published' %}done{% elif pr.status == 'failed' %}failed{% else %}triggered{% endif %}">{{ pr.get_status_display }}</span></td>
+                <td>{% if pr.platform_url %}<a href="{{ pr.platform_url }}" target="_blank">View Post</a>{% else %}-{% endif %}</td>
+                <td>{{ pr.published_at|date:"M d, H:i"|default:"-" }}</td>
+            </tr>
+            {% if pr.error_message %}
+            <tr>
+                <td colspan="4"><small style="color: #dc3545;">{{ pr.error_message }}</small></td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</article>
+{% endfor %}
+{% else %}
+<p>No content pieces generated yet.</p>
+{% endif %}
+{% endblock %}

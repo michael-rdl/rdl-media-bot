@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}RDL Media Bot{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <style>
+        :root {
+            --pico-font-size: 16px;
+        }
+        nav {
+            padding: 0.5rem 1rem;
+        }
+        nav ul li a {
+            font-size: 0.9rem;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .status-triggered { background: #6c757d; color: white; }
+        .status-capturing { background: #0d6efd; color: white; }
+        .status-clipping { background: #6610f2; color: white; }
+        .status-composing { background: #fd7e14; color: white; }
+        .status-publishing { background: #20c997; color: white; }
+        .status-done { background: #198754; color: white; }
+        .status-failed { background: #dc3545; color: white; }
+        .pipeline-stages {
+            display: flex;
+            gap: 0.25rem;
+            align-items: center;
+        }
+        .pipeline-stage {
+            padding: 0.2rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            background: #e9ecef;
+            color: #6c757d;
+        }
+        .pipeline-stage.active {
+            background: #0d6efd;
+            color: white;
+        }
+        .pipeline-stage.complete {
+            background: #198754;
+            color: white;
+        }
+        .pipeline-stage.failed {
+            background: #dc3545;
+            color: white;
+        }
+        .content-preview {
+            max-width: 100%;
+            border-radius: 8px;
+        }
+        video.content-preview {
+            max-height: 400px;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <ul>
+            <li><strong>RDL Media Bot</strong></li>
+        </ul>
+        <ul>
+            <li><a href="{% url 'dashboard:job-list' %}">Jobs</a></li>
+            <li><a href="{% url 'dashboard:job-create' %}">New Job</a></li>
+            <li><a href="{% url 'dashboard:stream-list' %}">Streams</a></li>
+            <li><a href="{% url 'dashboard:template-list' %}">Templates</a></li>
+            <li><a href="{% url 'dashboard:settings' %}">Settings</a></li>
+            <li><a href="/admin/">Admin</a></li>
+        </ul>
+    </nav>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

@@ -1,0 +1,27 @@
+Django>=4.2,<5.0
+djangorestframework>=3.14
+django-celery-results>=2.5
+celery[redis]>=5.3
+redis>=5.0
+psycopg2-binary>=2.9
+gunicorn>=21.2
+
+# Media processing
+ffmpeg-python>=0.2
+moviepy>=1.0
+Pillow>=10.0
+
+# Browser automation
+playwright>=1.40
+
+# YouTube downloading
+yt-dlp>=2024.1
+
+# Instagram publishing
+instagrapi>=2.8
+requests>=2.31
+
+# YouTube publishing
+google-api-python-client>=2.100
+google-auth-oauthlib>=1.1
+google-auth-httplib2>=0.1

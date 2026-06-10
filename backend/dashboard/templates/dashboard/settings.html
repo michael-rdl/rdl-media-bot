@@ -1,0 +1,45 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Settings - RDL Media Bot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Settings</h2>
+    <p>Current configuration (read-only view, edit via environment variables)</p>
+</hgroup>
+
+<article>
+    <header>Integration Status</header>
+    <table>
+        {% for key, value in config.items %}
+        <tr>
+            <td><strong>{{ key }}</strong></td>
+            <td>
+                {% if value == "Configured" or value == "Set" %}
+                <span class="status-badge status-done">{{ value }}</span>
+                {% elif value == "Not configured" or value == "Not set" %}
+                <span class="status-badge status-failed">{{ value }}</span>
+                {% else %}
+                <code>{{ value }}</code>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</article>
+
+<article>
+    <header>Webhook Endpoint</header>
+    <p>Configure rdl-base to POST to this URL when a run completes:</p>
+    <pre><code>POST /api/webhook/run-complete/
+
+{
+    "run_id": 123,
+    "event_session_id": 456,
+    "driver": "John Smith",
+    "run_number": 1
+}</code></pre>
+    {% if config.WEBHOOK_SECRET == "Set" %}
+    <p>Requests must include an <code>X-Webhook-Signature</code> header with an HMAC-SHA256 of the request body.</p>
+    {% endif %}
+</article>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Content Templates - RDL Media Bot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Content Templates</h2>
+    <p>Video composition templates for story/reel output. Manage in <a href="/admin/pipeline/contenttemplate/">Django Admin</a>.</p>
+</hgroup>
+
+{% if templates %}
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Resolution</th>
+            <th>Max Duration</th>
+            <th>Overlays</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for tmpl in templates %}
+        <tr>
+            <td>{{ tmpl.name }}</td>
+            <td>{{ tmpl.output_width }}x{{ tmpl.output_height }}</td>
+            <td>{{ tmpl.max_duration_seconds }}s</td>
+            <td>
+                {% if tmpl.show_driver_name %}Driver{% endif %}
+                {% if tmpl.show_run_stats %}Stats{% endif %}
+                {% if tmpl.show_speed_overlay %}Speed{% endif %}
+                {% if tmpl.logo_path %}Logo{% endif %}
+            </td>
+            <td><span class="status-badge status-{% if tmpl.active %}done{% else %}failed{% endif %}">{% if tmpl.active %}Active{% else %}Inactive{% endif %}</span></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p>No templates configured. <a href="/admin/pipeline/contenttemplate/add/">Create one in Django Admin</a>, or the pipeline will use sensible defaults.</p>
+{% endif %}
+{% endblock %}

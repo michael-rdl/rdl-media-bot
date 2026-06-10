@@ -1,0 +1,58 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Stream Sources - RDL Media Bot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Stream Sources</h2>
+    <p>YouTube streams and VODs to clip audio/video from</p>
+</hgroup>
+
+<form method="post" action="{% url 'dashboard:stream-add' %}" style="display: flex; gap: 1rem; align-items: end; margin-bottom: 2rem;">
+    {% csrf_token %}
+    <div style="flex: 1;">
+        <label for="label">Label</label>
+        <input type="text" id="label" name="label" required placeholder="e.g. FD Round 1 Stream">
+    </div>
+    <div style="flex: 2;">
+        <label for="url">YouTube URL</label>
+        <input type="url" id="url" name="url" required placeholder="https://www.youtube.com/watch?v=...">
+    </div>
+    <button type="submit" style="margin-bottom: 0;">Add</button>
+</form>
+
+{% if streams %}
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>Label</th>
+            <th>URL</th>
+            <th>Status</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for stream in streams %}
+        <tr>
+            <td>{{ stream.label }}</td>
+            <td><a href="{{ stream.url }}" target="_blank">{{ stream.url|truncatechars:60 }}</a></td>
+            <td><span class="status-badge status-{% if stream.active %}done{% else %}failed{% endif %}">{% if stream.active %}Active{% else %}Inactive{% endif %}</span></td>
+            <td style="display: flex; gap: 0.5rem;">
+                <form method="post" action="{% url 'dashboard:stream-toggle' stream.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="secondary outline" style="padding: 0.2rem 0.5rem; font-size: 0.8rem;">{% if stream.active %}Deactivate{% else %}Activate{% endif %}</button>
+                </form>
+                <form method="post" action="{% url 'dashboard:stream-delete' stream.pk %}" onsubmit="return confirm('Delete this stream source?')">
+                    {% csrf_token %}
+                    <button type="submit" class="secondary outline" style="padding: 0.2rem 0.5rem; font-size: 0.8rem; color: #dc3545;">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p>No stream sources configured. Add one above to enable YouTube clipping in the pipeline.</p>
+{% endif %}
+{% endblock %}

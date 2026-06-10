@@ -1,0 +1,12 @@
+__pycache__
+*.pyc
+*.pyo
+.git
+.env
+.env.*
+!.env.example
+*.md
+.cursor
+.vscode
+credentials/
+media/

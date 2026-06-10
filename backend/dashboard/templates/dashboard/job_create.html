@@ -1,0 +1,34 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Create Job - RDL Media Bot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Create Job</h2>
+    <p>Manually trigger the content pipeline for an rdl-base run</p>
+</hgroup>
+
+{% if error %}
+<article style="border-left: 4px solid #dc3545; padding-left: 1rem; background: #f8d7da;">
+    {{ error }}
+</article>
+{% endif %}
+
+<form method="post">
+    {% csrf_token %}
+    <label for="run_id">rdl-base Run ID <small>(required)</small></label>
+    <input type="number" id="run_id" name="run_id" required placeholder="e.g. 42">
+
+    <label for="driver_name">Driver Name</label>
+    <input type="text" id="driver_name" name="driver_name" placeholder="e.g. John Smith">
+
+    <label for="run_number">Run Number</label>
+    <input type="text" id="run_number" name="run_number" placeholder="e.g. 1">
+
+    <label>
+        <input type="checkbox" id="publish_as_reel" name="publish_as_reel">
+        Publish as Reel instead of Story
+    </label>
+
+    <button type="submit">Create Job & Run Pipeline</button>
+</form>
+{% endblock %}
