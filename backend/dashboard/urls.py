@@ -14,5 +14,6 @@ urlpatterns = [
     path("streams/<int:pk>/toggle/", views.stream_toggle, name="stream-toggle"),
     path("streams/<int:pk>/delete/", views.stream_delete, name="stream-delete"),
     path("templates/", views.template_list, name="template-list"),
+    path("test/", views.test_view, name="test"),
     path("settings/", views.settings_view, name="settings"),
 ]

@@ -1,0 +1,99 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Test - RDL Media Bot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Test Connection</h2>
+    <p>Live data from the rdl-base cloud server</p>
+</hgroup>
+
+{% if error %}
+<article style="border-left: 4px solid #dc3545; padding-left: 1rem; background: #f8d7da;">
+    <strong>Error:</strong> {{ error }}
+</article>
+{% endif %}
+
+<article>
+    <header>Server</header>
+    <table>
+        <tr><td><strong>URL</strong></td><td><code>{{ server_info.url }}</code></td></tr>
+        <tr><td><strong>API</strong></td><td><code>{{ server_info.api_url }}</code></td></tr>
+        <tr>
+            <td><strong>Status</strong></td>
+            <td>
+                <span class="status-badge status-{% if server_info.status == 'Connected' %}done{% else %}failed{% endif %}">
+                    {{ server_info.status }}
+                </span>
+            </td>
+        </tr>
+        <tr><td><strong>Events</strong></td><td>{{ server_info.event_count|default:"?" }}</td></tr>
+        <tr><td><strong>Runs</strong></td><td>{{ server_info.run_count|default:"?" }}</td></tr>
+    </table>
+</article>
+
+{% if events %}
+<article>
+    <header>Events ({{ events|length }})</header>
+    <figure>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in events %}
+            <tr>
+                <td>{{ event.id }}</td>
+                <td>{{ event.name|default:event.title|default:"-" }}</td>
+                <td>{{ event.event_type|default:"-" }}</td>
+                <td>{{ event.date|default:event.start_date|default:"-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+</article>
+{% endif %}
+
+<article>
+    <header>Runs ({{ runs|length }})</header>
+    <figure>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Type</th>
+                <th>Left Driver</th>
+                <th>Right Driver</th>
+                <th>Created</th>
+                <th>Visualiser</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in runs %}
+            <tr>
+                <td>{{ run.id }}</td>
+                <td>{{ run.run_type|default:"-" }}</td>
+                <td>
+                    {% if run.left_run_data and run.left_run_data.driver %}
+                        {{ run.left_run_data.driver.name|default:run.left_run_data.driver }}
+                    {% else %}-{% endif %}
+                </td>
+                <td>
+                    {% if run.right_run_data and run.right_run_data.driver %}
+                        {{ run.right_run_data.driver.name|default:run.right_run_data.driver }}
+                    {% else %}-{% endif %}
+                </td>
+                <td>{{ run.created_at|default:run.start|default:"-" }}</td>
+                <td><a href="{{ server_info.url }}/review/{{ run.id }}" target="_blank">View</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+</article>
+{% endblock %}

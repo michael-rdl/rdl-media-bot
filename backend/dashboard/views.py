@@ -1,10 +1,12 @@
 import logging
 
+from django.conf import settings as django_settings
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from pipeline.models import ContentTemplate, Job, StreamSource
+from pipeline.rdl_client import api_get
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +123,55 @@ def template_list(request):
     return render(request, "dashboard/template_list.html", {"templates": templates})
 
 
+def test_view(request):
+    """Test page: show rdl-base connection status, available servers/events, and all runs."""
+    error = None
+    server_info = {}
+    events = []
+    runs = []
+
+    try:
+        server_info = {
+            "url": django_settings.RDL_BASE_URL,
+            "api_url": django_settings.RDL_BASE_API_URL,
+        }
+
+        # Fetch events
+        resp = api_get("/public/events/")
+        if resp.status_code == 200:
+            events_data = resp.json()
+            events = events_data if isinstance(events_data, list) else events_data.get("results", [])
+        else:
+            resp = api_get("/event/")
+            if resp.status_code == 200:
+                events_data = resp.json()
+                events = events_data if isinstance(events_data, list) else events_data.get("results", [])
+
+        # Fetch runs
+        resp = api_get("/run/")
+        if resp.status_code == 200:
+            runs_data = resp.json()
+            runs = runs_data if isinstance(runs_data, list) else runs_data.get("results", [])
+        else:
+            error = f"API returned {resp.status_code}: {resp.text[:200]}"
+
+        server_info["status"] = "Connected"
+        server_info["run_count"] = len(runs)
+        server_info["event_count"] = len(events)
+
+    except Exception as exc:
+        error = str(exc)
+        server_info["status"] = "Error"
+
+    return render(request, "dashboard/test.html", {
+        "server_info": server_info,
+        "events": events,
+        "runs": runs,
+        "error": error,
+    })
+
+
 def settings_view(request):
-    from django.conf import settings as django_settings
 
     rdl_auth = "Not configured"
     if django_settings.RDL_INTERNAL_API_KEY:
