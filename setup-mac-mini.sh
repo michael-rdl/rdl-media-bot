@@ -100,12 +100,42 @@ if [ ! -f "$REPO_DIR/.env" ]; then
     echo ""
 fi
 
-# ---- 6. Set up auto-deploy cron ----
+# ---- 6. Set up auto-deploy watcher ----
 echo ""
 echo "[6/6] Setting up auto-deploy watcher..."
-CRON_CMD="* * * * * $REPO_DIR/deploy.sh >> $REPO_DIR/deploy.log 2>&1"
-(crontab -l 2>/dev/null | grep -v "rdl-media-bot/deploy.sh"; echo "$CRON_CMD") | crontab -
-echo "  Cron job installed (checks for updates every 60 seconds)"
+
+# Remove old cron entry if present
+(crontab -l 2>/dev/null | grep -v "rdl-media-bot/deploy.sh") | crontab - 2>/dev/null || true
+
+# Create launchd plist for the deploy watcher
+PLIST_PATH="$HOME/Library/LaunchAgents/com.rdl.media-bot-deploy.plist"
+mkdir -p "$HOME/Library/LaunchAgents"
+cat > "$PLIST_PATH" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.rdl.media-bot-deploy</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${REPO_DIR}/deploy.sh</string>
+    </array>
+    <key>StandardOutPath</key>
+    <string>${REPO_DIR}/deploy.log</string>
+    <key>StandardErrorPath</key>
+    <string>${REPO_DIR}/deploy.log</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>
+PLIST
+
+launchctl unload "$PLIST_PATH" 2>/dev/null || true
+launchctl load "$PLIST_PATH"
+echo "  Deploy watcher running (checks every 30 seconds)"
 
 # ---- Done ----
 echo ""
