@@ -1,4 +1,5 @@
 import logging
+import subprocess
 import time
 from pathlib import Path
 
@@ -6,16 +7,16 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_VIEWPORT = {"width": 1080, "height": 1920}
-SCENE_LOAD_SELECTOR = "canvas"
+VIEWPORT = {"width": 1080, "height": 1920}
 SCENE_LOAD_TIMEOUT_MS = 60_000
+LOADER_GONE_TIMEOUT_MS = 60_000
+TARGET_FPS = 30
 
 
 def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> Path:
     """
-    Launch a headless Chromium browser, authenticate with rdl-base,
-    navigate to the visualiser replay page, wait for it to fully load,
-    then start a fresh recording of just the replay.
+    Capture the visualiser replay as a smooth video by taking rapid
+    screenshots and stitching them with ffmpeg.
     """
     from playwright.sync_api import sync_playwright
 
@@ -23,6 +24,8 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
     replay_url = f"{base_url}/review/{run_id}"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    frames_dir = output_path.parent / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Capturing replay for run %d at %s (%.1fs)", run_id, replay_url, duration_seconds)
 
@@ -33,90 +36,104 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
                 "--no-sandbox",
                 "--disable-gpu",
                 "--disable-dev-shm-usage",
+                "--disable-software-rasterizer",
             ],
         )
 
-        # Phase 1: authenticate and load the scene (no recording yet)
-        setup_context = browser.new_context(viewport=DEFAULT_VIEWPORT)
-        page = setup_context.new_page()
+        context = browser.new_context(viewport=VIEWPORT)
+        page = context.new_page()
 
         _authenticate(page, base_url)
 
-        logger.info("Navigating to replay and waiting for scene to load...")
+        logger.info("Navigating to replay...")
         page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
 
+        # Wait for canvas to appear
         try:
-            page.wait_for_selector(SCENE_LOAD_SELECTOR, timeout=SCENE_LOAD_TIMEOUT_MS)
-            logger.info("Canvas found, waiting for scene to initialize...")
+            page.wait_for_selector("canvas", timeout=SCENE_LOAD_TIMEOUT_MS)
+            logger.info("Canvas found")
         except Exception:
-            logger.warning("Canvas not found within timeout, proceeding anyway")
+            logger.warning("Canvas not found within timeout")
 
-        page.wait_for_timeout(8000)
-
-        cookies = setup_context.cookies()
-        setup_context.close()
-
-        # Phase 2: fresh context with recording, already authenticated
-        record_context = browser.new_context(
-            viewport=DEFAULT_VIEWPORT,
-            record_video_dir=str(output_path.parent),
-            record_video_size=DEFAULT_VIEWPORT,
-        )
-        record_context.add_cookies(cookies)
-
-        record_page = record_context.new_page()
-
-        logger.info("Starting recording...")
-        record_page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
-
+        # Wait for the loading modal to disappear
+        logger.info("Waiting for loader to finish...")
         try:
-            record_page.wait_for_selector(SCENE_LOAD_SELECTOR, timeout=SCENE_LOAD_TIMEOUT_MS)
+            page.wait_for_function(
+                """() => {
+                    const loader = document.getElementById('loader');
+                    if (!loader) return true;
+                    return loader.style.display === 'none' || 
+                           getComputedStyle(loader).display === 'none';
+                }""",
+                timeout=LOADER_GONE_TIMEOUT_MS,
+            )
+            logger.info("Loader gone, scene is ready")
         except Exception:
-            pass
+            logger.warning("Loader didn't disappear within timeout, proceeding anyway")
 
-        record_page.wait_for_timeout(5000)
+        # Extra time for scene to settle and start animating
+        page.wait_for_timeout(2000)
 
-        record_time = duration_seconds + 2.0
-        logger.info("Recording for %.1f seconds", record_time)
-        time.sleep(record_time)
+        # Capture frames as screenshots
+        frame_interval = 1.0 / TARGET_FPS
+        total_frames = int(duration_seconds * TARGET_FPS)
+        logger.info("Capturing %d frames at %d fps...", total_frames, TARGET_FPS)
 
-        record_page.close()
-        record_context.close()
+        for i in range(total_frames):
+            frame_path = frames_dir / f"frame_{i:06d}.png"
+            page.screenshot(path=str(frame_path))
+            time.sleep(frame_interval)
+
+        logger.info("All frames captured")
+
+        page.close()
+        context.close()
         browser.close()
 
-    video_files = list(output_path.parent.glob("*.webm"))
-    if not video_files:
-        raise RuntimeError(f"No video file produced by Playwright in {output_path.parent}")
+    # Stitch frames into video with ffmpeg
+    _stitch_frames(frames_dir, output_path, TARGET_FPS)
 
-    source_video = video_files[0]
-
-    if output_path.suffix == ".mp4":
-        _convert_webm_to_mp4(source_video, output_path)
-        source_video.unlink(missing_ok=True)
-    else:
-        source_video.rename(output_path)
+    # Clean up frames
+    for f in frames_dir.glob("*.png"):
+        f.unlink()
+    frames_dir.rmdir()
 
     logger.info("Capture saved to %s", output_path)
     return output_path
+
+
+def _stitch_frames(frames_dir: Path, output_path: Path, fps: int):
+    """Stitch PNG frames into an MP4 video using ffmpeg."""
+    cmd = [
+        "ffmpeg", "-y",
+        "-framerate", str(fps),
+        "-i", str(frames_dir / "frame_%06d.png"),
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-r", str(fps),
+        str(output_path),
+    ]
+    logger.info("Stitching %d fps video...", fps)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg stitch failed: {result.stderr[:500]}")
 
 
 def _authenticate(page, base_url):
     """Log into rdl-base via the API so the browser session has auth cookies."""
     email = getattr(settings, "RDL_API_USERNAME", "")
     password = getattr(settings, "RDL_API_PASSWORD", "")
-    api_key = getattr(settings, "RDL_INTERNAL_API_KEY", "")
 
-    if not email and not api_key:
+    if not email:
         logger.warning("No auth credentials for visualiser capture")
-        return
-
-    if api_key:
         return
 
     login_url = f"{base_url}/api/v1/auth/login/"
     logger.info("Authenticating browser session...")
 
-    page.goto(base_url, wait_until="domcontentloaded")
+    page.goto(base_url, wait_until="domcontentloaded", timeout=30_000)
     page.wait_for_timeout(1000)
 
     result = page.evaluate(
@@ -140,22 +157,3 @@ def _authenticate(page, base_url):
         logger.info("Browser authenticated successfully")
     else:
         logger.error("Browser login failed: %s", result)
-
-
-def _convert_webm_to_mp4(input_path: Path, output_path: Path):
-    """Convert Playwright's WebM output to MP4 using ffmpeg."""
-    import subprocess
-
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", str(input_path),
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
-        "-pix_fmt", "yuv420p",
-        "-an",
-        str(output_path),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg conversion failed: {result.stderr[:500]}")
