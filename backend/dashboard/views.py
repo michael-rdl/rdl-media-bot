@@ -169,6 +169,38 @@ def test_view(request):
     })
 
 
+@require_POST
+def test_generate(request, run_id):
+    """Trigger the pipeline for a run from the test page."""
+    stream_source = StreamSource.objects.filter(active=True).first()
+    template = ContentTemplate.objects.filter(active=True).first()
+
+    # Pull run description from the API for the driver name
+    driver_name = ""
+    try:
+        resp = api_get(f"/run/{run_id}/")
+        if resp.status_code == 200:
+            data = resp.json()
+            driver_name = data.get("description", "")
+    except Exception:
+        pass
+
+    job = Job.objects.create(
+        rdl_run_id=run_id,
+        driver_name=driver_name,
+        stream_source=stream_source,
+        template=template,
+        skip_youtube_clip=stream_source is None,
+    )
+
+    from pipeline.tasks import run_pipeline
+    result = run_pipeline.delay(job.id)
+    job.celery_task_id = result.id
+    job.save(update_fields=["celery_task_id"])
+
+    return redirect("dashboard:job-detail", job_id=job.id)
+
+
 def settings_view(request):
 
     rdl_auth = "Not configured"

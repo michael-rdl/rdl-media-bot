@@ -69,7 +69,7 @@
                 <th>Type</th>
                 <th>Description</th>
                 <th>Created</th>
-                <th>Visualiser</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
@@ -79,7 +79,13 @@
                 <td>{{ run.run_type|default:"-" }}</td>
                 <td>{{ run.description|default:"-" }}</td>
                 <td>{{ run.created|default:"-" }}</td>
-                <td><a href="{{ server_info.url }}/review/{{ run.id }}" target="_blank">View</a></td>
+                <td style="display: flex; gap: 0.5rem;">
+                    <a href="{{ server_info.url }}/review/{{ run.id }}" target="_blank" role="button" class="secondary outline" style="padding: 0.2rem 0.6rem; font-size: 0.8rem;">Preview</a>
+                    <form method="post" action="{% url 'dashboard:test-generate' run.id %}" style="margin: 0;">
+                        {% csrf_token %}
+                        <button type="submit" style="padding: 0.2rem 0.6rem; font-size: 0.8rem;">Generate Video</button>
+                    </form>
+                </td>
             </tr>
             {% endfor %}
         </tbody>
