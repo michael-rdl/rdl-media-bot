@@ -8,12 +8,13 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 VIEWPORT = {"width": 1080, "height": 1920}
+TARGET_FPS = 10
 
 
 def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> Path:
     """
-    Capture the visualiser replay using Playwright's native video recording.
-    Two-phase approach: load everything first, then record clean.
+    Capture the visualiser replay by screenshotting at a steady rate
+    and stitching into a video. Single context -- no reload needed.
     """
     from playwright.sync_api import sync_playwright
 
@@ -21,8 +22,10 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
     replay_url = f"{base_url}/review/{run_id}"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    frames_dir = output_path.parent / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Capturing replay for run %d at %s (%.1fs)", run_id, replay_url, duration_seconds)
+    logger.info("Capturing run %d (%.1fs) at %d fps", run_id, duration_seconds, TARGET_FPS)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -34,75 +37,52 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
             ],
         )
 
-        # === Phase 1: Auth + preload (no recording) ===
-        setup_ctx = browser.new_context(viewport=VIEWPORT)
-        page = setup_ctx.new_page()
+        context = browser.new_context(viewport=VIEWPORT)
+        page = context.new_page()
 
         _authenticate(page, base_url)
 
-        logger.info("Preloading replay page...")
         page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
 
         _wait_for_scene_ready(page)
 
-        cookies = setup_ctx.cookies()
-        setup_ctx.close()
-        logger.info("Preload complete, got %d cookies", len(cookies))
+        # Capture frames -- measure actual screenshot time to maintain pace
+        total_frames = int(duration_seconds * TARGET_FPS)
+        frame_interval = 1.0 / TARGET_FPS
+        logger.info("Capturing %d frames...", total_frames)
 
-        # === Phase 2: Record with fresh context ===
-        rec_dir = output_path.parent / "rec"
-        rec_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(total_frames):
+            t0 = time.monotonic()
+            page.screenshot(path=str(frames_dir / f"f_{i:06d}.png"))
+            elapsed = time.monotonic() - t0
+            remaining = frame_interval - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
 
-        rec_ctx = browser.new_context(
-            viewport=VIEWPORT,
-            record_video_dir=str(rec_dir),
-            record_video_size=VIEWPORT,
-        )
-        rec_ctx.add_cookies(cookies)
-        rec_page = rec_ctx.new_page()
-
-        logger.info("Starting recording context...")
-        rec_page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
-
-        _wait_for_scene_ready(rec_page)
-
-        record_time = duration_seconds + 2.0
-        logger.info("Recording for %.1f seconds...", record_time)
-        time.sleep(record_time)
-
-        rec_page.close()
-        rec_ctx.close()
+        logger.info("Frames captured, stitching video...")
+        page.close()
+        context.close()
         browser.close()
 
-    # Find and convert the recorded video
-    video_files = list(rec_dir.glob("*.webm"))
-    if not video_files:
-        raise RuntimeError(f"No video file produced in {rec_dir}")
+    _stitch_frames(frames_dir, output_path)
 
-    source_video = video_files[0]
-    _convert_to_mp4(source_video, output_path)
-    source_video.unlink(missing_ok=True)
-
-    for f in rec_dir.glob("*"):
+    for f in frames_dir.glob("*.png"):
         f.unlink()
-    rec_dir.rmdir()
+    frames_dir.rmdir()
 
-    logger.info("Capture saved to %s (%.1f MB)", output_path, output_path.stat().st_size / 1e6)
+    logger.info("Saved %s (%.1f MB)", output_path, output_path.stat().st_size / 1e6)
     return output_path
 
 
 def _wait_for_scene_ready(page):
-    """Wait for the visualiser to pass auth, load data, and be ready to animate."""
-    # Wait for #loader to appear (means React app rendered, auth passed)
+    """Wait for auth check, data load, and 3D scene to be ready."""
     try:
         page.wait_for_selector("#loader", timeout=30_000)
-        logger.info("App rendered, waiting for scene data to load...")
+        logger.info("App loaded, waiting for scene...")
     except Exception:
         if "/login" in page.url:
             raise RuntimeError(f"Auth failed - redirected to {page.url}")
-        logger.warning("#loader not found, proceeding")
 
-    # Wait for #loader to disappear (scene data loaded, 3D ready)
     try:
         page.wait_for_function(
             """() => {
@@ -120,22 +100,37 @@ def _wait_for_scene_ready(page):
     page.wait_for_timeout(2000)
 
 
-def _convert_to_mp4(input_path: Path, output_path: Path):
-    """Convert Playwright's WebM to MP4."""
+def _stitch_frames(frames_dir: Path, output_path: Path):
+    """Stitch frames into a smooth MP4, interpolating up to 30fps."""
     cmd = [
         "ffmpeg", "-y",
-        "-i", str(input_path),
+        "-framerate", str(TARGET_FPS),
+        "-i", str(frames_dir / "f_%06d.png"),
+        "-vf", f"minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir,setpts=N/30/TB",
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "20",
         "-pix_fmt", "yuv420p",
-        "-r", "30",
-        "-an",
         str(output_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed: {result.stderr[:500]}")
+        # Fallback without interpolation
+        logger.warning("Interpolation failed, stitching without it")
+        cmd2 = [
+            "ffmpeg", "-y",
+            "-framerate", str(TARGET_FPS),
+            "-i", str(frames_dir / "f_%06d.png"),
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            "-r", "30",
+            str(output_path),
+        ]
+        result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=300)
+        if result2.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed: {result2.stderr[:500]}")
 
 
 def _authenticate(page, base_url):
