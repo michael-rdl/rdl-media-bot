@@ -67,8 +67,7 @@
             <tr>
                 <th>ID</th>
                 <th>Type</th>
-                <th>Left Driver</th>
-                <th>Right Driver</th>
+                <th>Description</th>
                 <th>Created</th>
                 <th>Visualiser</th>
             </tr>
@@ -78,17 +77,8 @@
             <tr>
                 <td>{{ run.id }}</td>
                 <td>{{ run.run_type|default:"-" }}</td>
-                <td>
-                    {% if run.left_run_data and run.left_run_data.driver %}
-                        {{ run.left_run_data.driver.name|default:run.left_run_data.driver }}
-                    {% else %}-{% endif %}
-                </td>
-                <td>
-                    {% if run.right_run_data and run.right_run_data.driver %}
-                        {{ run.right_run_data.driver.name|default:run.right_run_data.driver }}
-                    {% else %}-{% endif %}
-                </td>
-                <td>{{ run.created_at|default:run.start|default:"-" }}</td>
+                <td>{{ run.description|default:"-" }}</td>
+                <td>{{ run.created|default:"-" }}</td>
                 <td><a href="{{ server_info.url }}/review/{{ run.id }}" target="_blank">View</a></td>
             </tr>
             {% endfor %}
