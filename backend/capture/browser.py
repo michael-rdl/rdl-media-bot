@@ -43,7 +43,7 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
         _authenticate(page, base_url)
 
         logger.info("Navigating to replay and waiting for scene to load...")
-        page.goto(replay_url, wait_until="networkidle")
+        page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
 
         try:
             page.wait_for_selector(SCENE_LOAD_SELECTOR, timeout=SCENE_LOAD_TIMEOUT_MS)
@@ -51,13 +51,12 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
         except Exception:
             logger.warning("Canvas not found within timeout, proceeding anyway")
 
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(8000)
 
-        # Grab cookies so we can transfer auth to the recording context
         cookies = setup_context.cookies()
         setup_context.close()
 
-        # Phase 2: fresh context with recording enabled, already authenticated
+        # Phase 2: fresh context with recording, already authenticated
         record_context = browser.new_context(
             viewport=DEFAULT_VIEWPORT,
             record_video_dir=str(output_path.parent),
@@ -68,15 +67,14 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
         record_page = record_context.new_page()
 
         logger.info("Starting recording...")
-        record_page.goto(replay_url, wait_until="networkidle")
+        record_page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
 
         try:
             record_page.wait_for_selector(SCENE_LOAD_SELECTOR, timeout=SCENE_LOAD_TIMEOUT_MS)
         except Exception:
             pass
 
-        # Wait for the scene to start rendering
-        record_page.wait_for_timeout(3000)
+        record_page.wait_for_timeout(5000)
 
         record_time = duration_seconds + 2.0
         logger.info("Recording for %.1f seconds", record_time)
