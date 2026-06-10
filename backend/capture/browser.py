@@ -8,13 +8,12 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 VIEWPORT = {"width": 1080, "height": 1920}
-TARGET_FPS = 30
 
 
 def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> Path:
     """
-    Capture the visualiser replay as a smooth video by taking rapid
-    screenshots and stitching them with ffmpeg.
+    Capture the visualiser replay using Playwright's native video recording.
+    Two-phase approach: load everything first, then record clean.
     """
     from playwright.sync_api import sync_playwright
 
@@ -22,8 +21,6 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
     replay_url = f"{base_url}/review/{run_id}"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    frames_dir = output_path.parent / "frames"
-    frames_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Capturing replay for run %d at %s (%.1fs)", run_id, replay_url, duration_seconds)
 
@@ -37,117 +34,122 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
             ],
         )
 
-        context = browser.new_context(viewport=VIEWPORT)
-        page = context.new_page()
+        # === Phase 1: Auth + preload (no recording) ===
+        setup_ctx = browser.new_context(viewport=VIEWPORT)
+        page = setup_ctx.new_page()
 
-        # Step 1: Authenticate via the login API
         _authenticate(page, base_url)
 
-        # Step 2: Navigate to the replay page
-        logger.info("Navigating to replay...")
+        logger.info("Preloading replay page...")
         page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
 
-        # Step 3: Wait for auth check to pass (the app calls /api/v1/auth/me/)
-        # If auth works, it sets ready=true and renders the app with #loader
-        # If auth fails, it redirects to /rdl/login
-        logger.info("Waiting for app to pass auth check...")
-        try:
-            page.wait_for_selector("#loader", timeout=30_000)
-            logger.info("App loaded (auth passed), waiting for scene data...")
-        except Exception:
-            # Check if we got redirected to login
-            if "/login" in page.url:
-                logger.error("Redirected to login page at %s", page.url)
-                raise RuntimeError("Auth failed - visualiser redirected to login page")
-            logger.warning("#loader not found, proceeding anyway")
+        _wait_for_scene_ready(page)
 
-        # Step 4: Wait for the scene loader to disappear
-        logger.info("Waiting for scene to finish loading...")
-        try:
-            page.wait_for_function(
-                """() => {
-                    const loader = document.getElementById('loader');
-                    if (!loader) return false;
-                    return loader.style.display === 'none' ||
-                           getComputedStyle(loader).display === 'none';
-                }""",
-                timeout=90_000,
-            )
-            logger.info("Scene loaded, ready to capture")
-        except Exception:
-            logger.warning("Loader still visible after timeout, capturing anyway")
+        cookies = setup_ctx.cookies()
+        setup_ctx.close()
+        logger.info("Preload complete, got %d cookies", len(cookies))
 
-        # Step 5: Let the scene settle
-        page.wait_for_timeout(2000)
+        # === Phase 2: Record with fresh context ===
+        rec_dir = output_path.parent / "rec"
+        rec_dir.mkdir(parents=True, exist_ok=True)
 
-        # Step 6: Capture frames as screenshots
-        frame_interval = 1.0 / TARGET_FPS
-        total_frames = int(duration_seconds * TARGET_FPS)
-        logger.info("Capturing %d frames at %d fps...", total_frames, TARGET_FPS)
+        rec_ctx = browser.new_context(
+            viewport=VIEWPORT,
+            record_video_dir=str(rec_dir),
+            record_video_size=VIEWPORT,
+        )
+        rec_ctx.add_cookies(cookies)
+        rec_page = rec_ctx.new_page()
 
-        for i in range(total_frames):
-            frame_path = frames_dir / f"frame_{i:06d}.png"
-            page.screenshot(path=str(frame_path))
-            time.sleep(frame_interval)
+        logger.info("Starting recording context...")
+        rec_page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
 
-        logger.info("All frames captured")
+        _wait_for_scene_ready(rec_page)
 
-        page.close()
-        context.close()
+        record_time = duration_seconds + 2.0
+        logger.info("Recording for %.1f seconds...", record_time)
+        time.sleep(record_time)
+
+        rec_page.close()
+        rec_ctx.close()
         browser.close()
 
-    # Step 7: Stitch frames into video with ffmpeg
-    _stitch_frames(frames_dir, output_path, TARGET_FPS)
+    # Find and convert the recorded video
+    video_files = list(rec_dir.glob("*.webm"))
+    if not video_files:
+        raise RuntimeError(f"No video file produced in {rec_dir}")
 
-    # Clean up frames
-    for f in frames_dir.glob("*.png"):
+    source_video = video_files[0]
+    _convert_to_mp4(source_video, output_path)
+    source_video.unlink(missing_ok=True)
+
+    for f in rec_dir.glob("*"):
         f.unlink()
-    frames_dir.rmdir()
+    rec_dir.rmdir()
 
-    logger.info("Capture saved to %s", output_path)
+    logger.info("Capture saved to %s (%.1f MB)", output_path, output_path.stat().st_size / 1e6)
     return output_path
 
 
-def _stitch_frames(frames_dir: Path, output_path: Path, fps: int):
-    """Stitch PNG frames into an MP4 video using ffmpeg."""
+def _wait_for_scene_ready(page):
+    """Wait for the visualiser to pass auth, load data, and be ready to animate."""
+    # Wait for #loader to appear (means React app rendered, auth passed)
+    try:
+        page.wait_for_selector("#loader", timeout=30_000)
+        logger.info("App rendered, waiting for scene data to load...")
+    except Exception:
+        if "/login" in page.url:
+            raise RuntimeError(f"Auth failed - redirected to {page.url}")
+        logger.warning("#loader not found, proceeding")
+
+    # Wait for #loader to disappear (scene data loaded, 3D ready)
+    try:
+        page.wait_for_function(
+            """() => {
+                const el = document.getElementById('loader');
+                if (!el) return false;
+                return el.style.display === 'none' ||
+                       getComputedStyle(el).display === 'none';
+            }""",
+            timeout=90_000,
+        )
+        logger.info("Scene ready")
+    except Exception:
+        logger.warning("Loader still visible after timeout")
+
+    page.wait_for_timeout(2000)
+
+
+def _convert_to_mp4(input_path: Path, output_path: Path):
+    """Convert Playwright's WebM to MP4."""
     cmd = [
         "ffmpeg", "-y",
-        "-framerate", str(fps),
-        "-i", str(frames_dir / "frame_%06d.png"),
+        "-i", str(input_path),
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "20",
         "-pix_fmt", "yuv420p",
-        "-r", str(fps),
+        "-r", "30",
+        "-an",
         str(output_path),
     ]
-    logger.info("Stitching %d fps video...", fps)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg stitch failed: {result.stderr[:500]}")
+        raise RuntimeError(f"ffmpeg failed: {result.stderr[:500]}")
 
 
 def _authenticate(page, base_url):
-    """
-    Log into rdl-base via the login API. The visualiser's auth check
-    calls /api/v1/auth/me/ -- the session cookie from login satisfies this.
-    """
+    """Log in via the rdl-base login API from the browser."""
     email = getattr(settings, "RDL_API_USERNAME", "")
     password = getattr(settings, "RDL_API_PASSWORD", "")
 
     if not email:
-        logger.warning("No auth credentials for visualiser capture")
         return
 
-    login_url = f"{base_url}/api/v1/auth/login/"
-
-    # Go to the base URL first so cookies are set on the right domain
-    logger.info("Loading base URL for cookie domain...")
+    logger.info("Authenticating as %s...", email)
     page.goto(f"{base_url}/rdl/login", wait_until="domcontentloaded", timeout=30_000)
     page.wait_for_timeout(2000)
 
-    # Use the browser's fetch to call the login API (sets session cookie)
-    logger.info("Logging in as %s...", email)
     result = page.evaluate(
         """async ([url, email, password]) => {
             try {
@@ -157,30 +159,15 @@ def _authenticate(page, base_url):
                     body: JSON.stringify({email, password}),
                     credentials: 'include',
                 });
-                const text = await resp.text();
-                return {status: resp.status, ok: resp.ok, body: text.substring(0, 200)};
-            } catch (e) {
-                return {status: 0, error: e.message};
-            }
-        }""",
-        [login_url, email, password],
-    )
-
-    if result.get("ok"):
-        logger.info("Browser authenticated successfully")
-    else:
-        logger.error("Browser login failed: %s", result)
-
-    # Verify auth works by checking /api/v1/auth/me/
-    me_result = page.evaluate(
-        """async (url) => {
-            try {
-                const resp = await fetch(url, {credentials: 'include'});
                 return {status: resp.status, ok: resp.ok};
             } catch (e) {
                 return {status: 0, error: e.message};
             }
         }""",
-        f"{base_url}/api/v1/auth/me/",
+        [f"{base_url}/api/v1/auth/login/", email, password],
     )
-    logger.info("Auth verify /me/: %s", me_result)
+
+    if result.get("ok"):
+        logger.info("Authenticated")
+    else:
+        logger.error("Login failed: %s", result)
