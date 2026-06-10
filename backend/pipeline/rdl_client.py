@@ -44,15 +44,24 @@ def _do_login(session: requests.Session):
     api_url = settings.RDL_BASE_API_URL.rstrip("/")
     login_url = f"{api_url}/auth/login/"
 
-    resp = session.post(login_url, json={
-        "email": email,
-        "password": password,
-    }, timeout=15)
+    # Some Django servers need the Referer / Content-Type set properly
+    headers = {
+        "Content-Type": "application/json",
+        "Referer": api_url,
+    }
 
-    if resp.status_code == 200:
-        logger.info("Authenticated with rdl-base API as %s", email)
-    else:
-        logger.error("rdl-base login failed (%d): %s", resp.status_code, resp.text[:200])
+    try:
+        resp = session.post(login_url, json={
+            "email": email,
+            "password": password,
+        }, headers=headers, timeout=15)
+
+        if resp.status_code == 200:
+            logger.info("Authenticated with rdl-base API as %s", email)
+        else:
+            logger.error("rdl-base login failed (%d): %s", resp.status_code, resp.text[:200])
+    except Exception as exc:
+        logger.error("rdl-base login request failed: %s", exc)
 
 
 def api_get(path: str, **kwargs) -> requests.Response:

@@ -136,16 +136,14 @@ def test_view(request):
             "api_url": django_settings.RDL_BASE_API_URL,
         }
 
-        # Fetch events
-        resp = api_get("/public/events/")
-        if resp.status_code == 200:
-            events_data = resp.json()
-            events = events_data if isinstance(events_data, list) else events_data.get("results", [])
-        else:
+        # Fetch events (try authenticated endpoint)
+        try:
             resp = api_get("/event/")
             if resp.status_code == 200:
                 events_data = resp.json()
                 events = events_data if isinstance(events_data, list) else events_data.get("results", [])
+        except Exception:
+            pass
 
         # Fetch runs
         resp = api_get("/run/")
