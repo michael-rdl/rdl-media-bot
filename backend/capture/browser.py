@@ -8,13 +8,12 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 VIEWPORT = {"width": 1080, "height": 1920}
-TARGET_FPS = 30
 
 
 def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> Path:
     """
-    Capture the visualiser replay with GPU-accelerated Chromium.
-    Uses Playwright's native video recording for smooth output.
+    Capture the visualiser replay. Records everything including loading,
+    then trims to just the scene playback using ffmpeg.
     """
     from playwright.sync_api import sync_playwright
 
@@ -30,43 +29,61 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False, args=["--headless=new"])
 
-        # Phase 1: auth + preload (no recording)
-        setup_ctx = browser.new_context(viewport=VIEWPORT)
-        page = setup_ctx.new_page()
-
-        _authenticate(page, base_url)
-
-        page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
-        _wait_for_scene_ready(page)
-
-        cookies = setup_ctx.cookies()
-        setup_ctx.close()
-
-        # Phase 2: record
-        rec_ctx = browser.new_context(
+        context = browser.new_context(
             viewport=VIEWPORT,
             record_video_dir=str(rec_dir),
             record_video_size=VIEWPORT,
         )
-        rec_ctx.add_cookies(cookies)
-        rec_page = rec_ctx.new_page()
+        page = context.new_page()
 
-        rec_page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
-        _wait_for_scene_ready(rec_page)
+        _authenticate(page, base_url)
 
+        logger.info("Navigating to replay...")
+        recording_start = time.monotonic()
+        page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
+
+        # Wait for scene to be fully loaded
+        try:
+            page.wait_for_selector("#loader", timeout=30_000)
+            logger.info("App loaded, waiting for scene data...")
+        except Exception:
+            if "/login" in page.url:
+                raise RuntimeError(f"Auth failed - redirected to {page.url}")
+
+        try:
+            page.wait_for_function(
+                """() => {
+                    const el = document.getElementById('loader');
+                    if (!el) return false;
+                    return el.style.display === 'none' ||
+                           getComputedStyle(el).display === 'none';
+                }""",
+                timeout=90_000,
+            )
+        except Exception:
+            logger.warning("Loader still visible after timeout")
+
+        page.wait_for_timeout(1000)
+        trim_seconds = time.monotonic() - recording_start
+        logger.info("Scene ready after %.1fs (will trim this from recording)", trim_seconds)
+
+        # Record the actual replay
         logger.info("Recording for %.1f seconds...", duration_seconds)
         time.sleep(duration_seconds + 2)
 
-        rec_page.close()
-        rec_ctx.close()
+        page.close()
+        context.close()
         browser.close()
 
+    # Find recorded video and trim off the loading portion
     video_files = list(rec_dir.glob("*.webm"))
     if not video_files:
         raise RuntimeError(f"No video produced in {rec_dir}")
 
-    _convert_to_mp4(video_files[0], output_path)
-    video_files[0].unlink(missing_ok=True)
+    raw_video = video_files[0]
+    _trim_and_convert(raw_video, output_path, trim_seconds)
+    raw_video.unlink(missing_ok=True)
+
     for f in rec_dir.glob("*"):
         f.unlink()
     rec_dir.rmdir()
@@ -75,34 +92,11 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
     return output_path
 
 
-def _wait_for_scene_ready(page):
-    try:
-        page.wait_for_selector("#loader", timeout=30_000)
-        logger.info("App loaded, waiting for scene...")
-    except Exception:
-        if "/login" in page.url:
-            raise RuntimeError(f"Auth failed - redirected to {page.url}")
-
-    try:
-        page.wait_for_function(
-            """() => {
-                const el = document.getElementById('loader');
-                if (!el) return false;
-                return el.style.display === 'none' ||
-                       getComputedStyle(el).display === 'none';
-            }""",
-            timeout=90_000,
-        )
-        logger.info("Scene ready")
-    except Exception:
-        logger.warning("Loader still visible after timeout")
-
-    page.wait_for_timeout(2000)
-
-
-def _convert_to_mp4(input_path: Path, output_path: Path):
+def _trim_and_convert(input_path: Path, output_path: Path, trim_start: float):
+    """Trim the loading portion from the start and convert to MP4."""
     cmd = [
         "ffmpeg", "-y",
+        "-ss", str(trim_start),
         "-i", str(input_path),
         "-c:v", "libx264",
         "-preset", "fast",
@@ -112,6 +106,7 @@ def _convert_to_mp4(input_path: Path, output_path: Path):
         "-an",
         str(output_path),
     ]
+    logger.info("Trimming %.1fs from start and converting to MP4...", trim_start)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {result.stderr[:500]}")
