@@ -6,7 +6,7 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_VIEWPORT = {"width": 1920, "height": 1080}
+DEFAULT_VIEWPORT = {"width": 1080, "height": 1920}
 SCENE_LOAD_SELECTOR = "canvas"
 SCENE_LOAD_TIMEOUT_MS = 60_000
 
