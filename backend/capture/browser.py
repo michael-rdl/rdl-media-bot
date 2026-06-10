@@ -67,9 +67,9 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
         trim_seconds = time.monotonic() - recording_start + 6.0
         logger.info("Scene ready, trimming first %.1fs from recording", trim_seconds)
 
-        # Record the actual replay
+        # Record the actual replay (no extra buffer -- trim handles the start)
         logger.info("Recording for %.1f seconds...", duration_seconds)
-        time.sleep(duration_seconds + 2)
+        time.sleep(duration_seconds - 3)
 
         page.close()
         context.close()
