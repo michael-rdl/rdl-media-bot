@@ -1,7 +1,26 @@
 services:
+  db:
+    image: postgis/postgis:15-3.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-media_bot}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
   backend:
     build: .
     restart: unless-stopped
+    depends_on:
+      - db
+      - redis
     ports:
       - "${BACKEND_PORT:-8001}:8000"
     env_file: .env
@@ -12,6 +31,9 @@ services:
     build: .
     restart: unless-stopped
     command: celery -A media_bot worker -l info -c 2 --max-tasks-per-child=10
+    depends_on:
+      - db
+      - redis
     env_file: .env
     volumes:
       - media_data:/app/media
@@ -20,12 +42,11 @@ services:
     build: .
     restart: unless-stopped
     command: celery -A media_bot beat -l info --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      - redis
     env_file: .env
 
 volumes:
+  db_data:
+  redis_data:
   media_data:
-
-networks:
-  default:
-    name: rdl-base_default
-    external: true
