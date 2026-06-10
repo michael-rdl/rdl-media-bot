@@ -49,8 +49,8 @@
             <tr>
                 <td>{{ event.id }}</td>
                 <td>{{ event.name|default:"-" }}</td>
-                <td>{{ event.event_type|default:"-" }}</td>
-                <td>{{ event.date|default:event.start_date|default:"-" }}</td>
+                <td>{{ event.event_type_display|default:event.event_type|default:"-" }}</td>
+                <td>{{ event.created|default:"-" }}</td>
             </tr>
             {% endfor %}
         </tbody>
