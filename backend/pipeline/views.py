@@ -8,7 +8,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST, require_GET
 
-from .models import ContentTemplate, Job, StreamSource
+from .models import ContentTemplate, Driver, Job, Sponsor, StreamSource
 
 logger = logging.getLogger(__name__)
 
@@ -154,3 +154,49 @@ def job_retry_api(request, job_id):
     job.save(update_fields=["celery_task_id"])
 
     return JsonResponse({"job_id": job.id, "status": job.status})
+
+
+def _serialize_driver(driver):
+    return {
+        "id": driver.id,
+        "first_name": driver.first_name,
+        "last_name": driver.last_name,
+        "car_number": driver.car_number,
+        "picture": driver.picture.url if driver.picture else None,
+        "instagram": driver.instagram,
+        "country": driver.country,
+        "email": driver.email,
+        "sponsors": [
+            {"id": s.id, "name": s.name, "instagram": s.instagram}
+            for s in driver.sponsors.all()
+        ],
+        "spotter": {
+            "first_name": driver.spotter_first_name,
+            "last_name": driver.spotter_last_name,
+            "instagram": driver.spotter_instagram,
+            "email": driver.spotter_email,
+        },
+        "team_manager": {
+            "first_name": driver.team_manager_first_name,
+            "last_name": driver.team_manager_last_name,
+            "instagram": driver.team_instagram,
+            "email": driver.team_email,
+        },
+        "created_at": driver.created_at.isoformat(),
+        "updated_at": driver.updated_at.isoformat(),
+    }
+
+
+@require_GET
+def driver_list_api(request):
+    drivers = Driver.objects.prefetch_related("sponsors").all()
+    return JsonResponse({"drivers": [_serialize_driver(d) for d in drivers]})
+
+
+@require_GET
+def driver_detail_api(request, driver_id):
+    try:
+        driver = Driver.objects.prefetch_related("sponsors").get(id=driver_id)
+    except Driver.DoesNotExist:
+        return JsonResponse({"error": "Not found"}, status=404)
+    return JsonResponse(_serialize_driver(driver))

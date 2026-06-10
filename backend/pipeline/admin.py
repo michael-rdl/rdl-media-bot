@@ -1,6 +1,30 @@
 from django.contrib import admin
 
-from .models import ContentPiece, ContentTemplate, Job, PublishResult, StreamSource
+from .models import ContentPiece, ContentTemplate, Driver, Job, PublishResult, Sponsor, StreamSource
+
+
+class SponsorInline(admin.TabularInline):
+    model = Sponsor
+    extra = 1
+
+
+@admin.register(Driver)
+class DriverAdmin(admin.ModelAdmin):
+    list_display = ("__str__", "car_number", "country", "email", "updated_at")
+    search_fields = ("first_name", "last_name", "car_number", "email")
+    list_filter = ("country",)
+    inlines = [SponsorInline]
+    fieldsets = (
+        (None, {
+            "fields": ("first_name", "last_name", "car_number", "picture", "instagram", "country", "email"),
+        }),
+        ("Spotter", {
+            "fields": ("spotter_first_name", "spotter_last_name", "spotter_instagram", "spotter_email"),
+        }),
+        ("Team Manager", {
+            "fields": ("team_manager_first_name", "team_manager_last_name", "team_instagram", "team_email"),
+        }),
+    )
 
 
 class ContentPieceInline(admin.TabularInline):

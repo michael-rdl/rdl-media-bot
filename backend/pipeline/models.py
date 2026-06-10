@@ -1,6 +1,47 @@
 from django.db import models
 
 
+class Driver(models.Model):
+    first_name = models.CharField(max_length=100)
+    last_name = models.CharField(max_length=100)
+    car_number = models.CharField(max_length=10)
+    picture = models.ImageField(upload_to="drivers/", blank=True)
+    instagram = models.CharField(max_length=200, blank=True)
+    country = models.CharField(max_length=100, blank=True)
+    email = models.EmailField(blank=True)
+
+    spotter_first_name = models.CharField(max_length=100, blank=True)
+    spotter_last_name = models.CharField(max_length=100, blank=True)
+    spotter_instagram = models.CharField(max_length=200, blank=True)
+    spotter_email = models.EmailField(blank=True)
+
+    team_manager_first_name = models.CharField(max_length=100, blank=True)
+    team_manager_last_name = models.CharField(max_length=100, blank=True)
+    team_instagram = models.CharField(max_length=200, blank=True)
+    team_email = models.EmailField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["last_name", "first_name"]
+
+    def __str__(self):
+        return f"{self.first_name} {self.last_name} (#{self.car_number})"
+
+
+class Sponsor(models.Model):
+    driver = models.ForeignKey(Driver, on_delete=models.CASCADE, related_name="sponsors")
+    name = models.CharField(max_length=200)
+    instagram = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name} (sponsor of {self.driver})"
+
+
 class StreamSource(models.Model):
     label = models.CharField(max_length=200)
     url = models.URLField(help_text="YouTube stream or VOD URL")
