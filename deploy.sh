@@ -16,12 +16,17 @@ check_and_deploy() {
 
         git pull origin main --quiet
 
-        if echo "$CHANGED" | grep -qE "Dockerfile|requirements.txt|docker-compose"; then
+        if echo "$CHANGED" | grep -qE "Dockerfile|requirements.txt"; then
             echo "$(date): Infrastructure changed, rebuilding images..."
+            docker compose down
             docker compose up -d --build
+        elif echo "$CHANGED" | grep -qE "docker-compose|\.env"; then
+            echo "$(date): Config changed, recreating containers..."
+            docker compose down
+            docker compose up -d
         else
             echo "$(date): Code-only change, restarting containers..."
-            docker compose up -d --force-recreate --no-build
+            docker compose restart backend celery-worker celery-beat
         fi
 
         echo "$(date): Deploy complete"
