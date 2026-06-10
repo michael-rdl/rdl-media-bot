@@ -124,7 +124,7 @@ class InstagramGraphPublisher(ContentPublisher):
 class InstagrapiPublisher(ContentPublisher):
     """
     Fallback publisher using instagrapi (private API).
-    More flexible for Stories but uses unofficial API.
+    More flexible for Stories -- supports mentions, links, hashtags.
     """
 
     def __init__(self):
@@ -142,15 +142,46 @@ class InstagrapiPublisher(ContentPublisher):
         thumbnail_path: Optional[Path] = None,
         tags: Optional[list[str]] = None,
         media_type: str = "STORIES",
+        mentions: Optional[list[str]] = None,
+        link_url: Optional[str] = None,
         **kwargs,
     ) -> dict:
         from instagrapi import Client
+        from instagrapi.types import StoryLink, StoryMention
 
         cl = Client()
         cl.login(self.username, self.password)
 
+        story_mentions = []
+        if mentions:
+            for i, handle in enumerate(mentions):
+                try:
+                    user = cl.user_info_by_username(handle)
+                    story_mentions.append(StoryMention(
+                        user=user,
+                        x=0.5,
+                        y=0.82 + (i * 0.04),
+                        width=0.6,
+                        height=0.04,
+                    ))
+                    logger.info("Added mention for @%s", handle)
+                except Exception as exc:
+                    logger.warning("Could not resolve @%s: %s", handle, exc)
+
+        story_links = []
+        if link_url:
+            story_links.append(StoryLink(
+                webUri=link_url,
+                text="Watch Full Replay",
+            ))
+
         if media_type == "STORIES":
-            result = cl.video_upload_to_story(video_path, caption)
+            result = cl.video_upload_to_story(
+                video_path,
+                caption,
+                mentions=story_mentions,
+                links=story_links,
+            )
         elif media_type == "REELS":
             result = cl.clip_upload(video_path, caption)
         else:

@@ -19,6 +19,7 @@ def capture_visualiser(job_id: int):
     job = Job.objects.get(id=job_id)
 
     run_data = _fetch_run_metadata(job.rdl_run_id)
+    _enrich_driver_instagram(run_data)
     job.run_metadata = run_data
     job.save(update_fields=["run_metadata"])
 
@@ -56,6 +57,30 @@ def _fetch_run_metadata(run_id: int) -> dict:
     resp = api_get(f"/run/{run_id}/")
     resp.raise_for_status()
     return resp.json()
+
+
+def _enrich_driver_instagram(run_data: dict):
+    """Fetch instagram handles for drivers via the driver API."""
+    for side in ("left_run_data", "right_run_data"):
+        rd = run_data.get(side)
+        if not rd or not rd.get("driver"):
+            continue
+        driver = rd["driver"]
+        driver_id = driver.get("id")
+        if not driver_id:
+            continue
+        try:
+            resp = api_get(f"/driver/{driver_id}/")
+            if resp.status_code == 200:
+                driver_detail = resp.json()
+                ig_url = driver_detail.get("instagram_url", "")
+                if ig_url:
+                    handle = ig_url.rstrip("/").split("/")[-1]
+                    handle = handle.lstrip("@")
+                    driver["instagram_handle"] = handle
+                    logger.info("Driver %s instagram: @%s", driver.get("name"), handle)
+        except Exception:
+            pass
 
 
 def _estimate_duration(run_data: dict) -> float:

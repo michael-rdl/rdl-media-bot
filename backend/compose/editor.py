@@ -20,6 +20,7 @@ def compose_story_video(
     run_number: str = "",
     stats: Optional[dict] = None,
     logo_path: Optional[Path] = None,
+    ig_handles: Optional[list[str]] = None,
     **kwargs,
 ) -> Path:
     """
@@ -37,6 +38,7 @@ def compose_story_video(
         run_number=run_number,
         stats=stats,
         logo_path=logo_path,
+        ig_handles=ig_handles or [],
     )
 
     inputs = ["-i", str(viz_path), "-i", str(overlay_path)]
@@ -97,6 +99,7 @@ def _create_overlay(
     run_number: str = "",
     stats: Optional[dict] = None,
     logo_path: Optional[Path] = None,
+    ig_handles: Optional[list[str]] = None,
 ):
     """Create a transparent PNG overlay with text and optional logo."""
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -105,13 +108,22 @@ def _create_overlay(
     font_large = _load_font(54)
     font_medium = _load_font(38)
     font_small = _load_font(28)
+    font_handle = _load_font(32)
 
-    y_bottom = int(height * 0.82)
+    y_bottom = int(height * 0.80)
 
-    # Semi-transparent bar at bottom for text
-    if driver_name or run_number:
+    # Calculate how tall the bottom bar needs to be
+    bar_lines = 0
+    if driver_name:
+        bar_lines += 1
+    if run_number:
+        bar_lines += 1
+    if ig_handles:
+        bar_lines += 1
+
+    if bar_lines > 0:
         bar_top = y_bottom - 20
-        bar_bottom = min(y_bottom + 140, height)
+        bar_bottom = min(y_bottom + bar_lines * 55 + 30, height)
         draw.rectangle(
             [(0, bar_top), (width, bar_bottom)],
             fill=(0, 0, 0, 150),
@@ -123,7 +135,16 @@ def _create_overlay(
         text_w = bbox[2] - bbox[0]
         x = (width - text_w) // 2
         draw.text((x, y_bottom), driver_name, font=font_large, fill=(255, 255, 255, 255))
-        y_bottom += 60
+        y_bottom += 55
+
+    # Instagram handles
+    if ig_handles:
+        handle_text = "  ".join(f"@{h}" for h in ig_handles)
+        bbox = draw.textbbox((0, 0), handle_text, font=font_handle)
+        text_w = bbox[2] - bbox[0]
+        x = (width - text_w) // 2
+        draw.text((x, y_bottom), handle_text, font=font_handle, fill=(180, 220, 255, 230))
+        y_bottom += 50
 
     # Run number
     if run_number:

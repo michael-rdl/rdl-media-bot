@@ -43,6 +43,7 @@ def compose_story(job_id: int):
     output_path = media_root / "jobs" / str(job_id) / "story_final.mp4"
 
     stats = _extract_stats(job.run_metadata)
+    ig_handles = _extract_instagram_handles(job.run_metadata)
 
     logo_path = Path(template.logo_path) if template.logo_path else None
 
@@ -57,9 +58,7 @@ def compose_story(job_id: int):
         run_number=job.run_number,
         stats=stats,
         logo_path=logo_path,
-        font_family=template.font_family,
-        font_size=template.font_size,
-        font_color=template.font_color,
+        ig_handles=ig_handles,
     )
 
     file_size = output_path.stat().st_size
@@ -114,6 +113,18 @@ def _extract_stats(run_metadata: dict) -> dict:
         stats["score"] = float(run_metadata["total_score"])
 
     return stats
+
+
+def _extract_instagram_handles(run_metadata: dict) -> list[str]:
+    handles = []
+    for side in ("left_run_data", "right_run_data"):
+        rd = run_metadata.get(side)
+        if not rd or not rd.get("driver"):
+            continue
+        handle = rd["driver"].get("instagram_handle", "")
+        if handle:
+            handles.append(handle)
+    return handles
 
 
 def _probe_video(path: Path) -> dict:

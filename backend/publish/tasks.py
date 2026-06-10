@@ -27,11 +27,12 @@ def publish_content(job_id: int):
     video_path = media_root / story_piece.file.name
 
     caption = _build_caption(job)
+    ig_handles = _extract_instagram_handles(job.run_metadata)
 
     if settings.INSTAGRAM_ACCESS_TOKEN:
         _publish_instagram_graph(job, story_piece, video_path, caption)
     elif settings.INSTAGRAM_USERNAME:
-        _publish_instagram_private(job, story_piece, video_path, caption)
+        _publish_instagram_private(job, story_piece, video_path, caption, ig_handles)
     else:
         logger.warning("Job #%d: no Instagram credentials configured, skipping", job_id)
 
@@ -77,7 +78,7 @@ def _publish_instagram_graph(job, story_piece, video_path, caption):
         raise
 
 
-def _publish_instagram_private(job, story_piece, video_path, caption):
+def _publish_instagram_private(job, story_piece, video_path, caption, ig_handles=None):
     from .instagram import InstagrapiPublisher
 
     media_type = "REELS" if job.publish_as_reel else "STORIES"
@@ -94,10 +95,15 @@ def _publish_instagram_private(job, story_piece, video_path, caption):
         caption=caption,
     )
 
+    replay_url = f"{settings.RDL_BASE_URL.rstrip('/')}/review/{job.rdl_run_id}"
+
     try:
         publisher = InstagrapiPublisher()
         result = publisher.publish(
-            video_path, caption, media_type=media_type,
+            video_path, caption,
+            media_type=media_type,
+            mentions=ig_handles or [],
+            link_url=replay_url,
         )
         pr.status = PublishResult.Status.PUBLISHED
         pr.platform_post_id = result["post_id"]
@@ -165,6 +171,18 @@ def _build_caption(job) -> str:
     parts.append("#drift #motorsport #racedatalabs #rdl")
 
     return " | ".join(p for p in parts if p) if parts else "Race Data Labs"
+
+
+def _extract_instagram_handles(run_metadata: dict) -> list[str]:
+    handles = []
+    for side in ("left_run_data", "right_run_data"):
+        rd = run_metadata.get(side)
+        if not rd or not rd.get("driver"):
+            continue
+        handle = rd["driver"].get("instagram_handle", "")
+        if handle:
+            handles.append(handle)
+    return handles
 
 
 def _extract_stats(run_metadata: dict) -> dict:
