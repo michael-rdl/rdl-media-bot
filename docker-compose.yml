@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgis/postgis:15-3.4
+    image: postgres:15-alpine
     restart: unless-stopped
     ports:
       - "5432:5432"
