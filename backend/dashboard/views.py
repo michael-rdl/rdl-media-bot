@@ -227,9 +227,27 @@ def event_detail(request, event_id):
     sessions = event.sessions.annotate(
         job_count=models.Count("jobs"),
     ).all()
+
+    runs = []
+    try:
+        resp = api_get("/run/")
+        if resp.status_code == 200:
+            data = resp.json()
+            all_runs = data if isinstance(data, list) else data.get("results", [])
+            runs = [r for r in all_runs if r.get("event_id") == event.rdl_event_id]
+    except Exception:
+        pass
+
+    existing_run_ids = set(
+        Job.objects.filter(rdl_run_id__in=[r["id"] for r in runs])
+        .values_list("rdl_run_id", flat=True)
+    ) if runs else set()
+
     return render(request, "dashboard/event_detail.html", {
         "event": event,
         "sessions": sessions,
+        "runs": runs,
+        "existing_run_ids": existing_run_ids,
     })
 
 
