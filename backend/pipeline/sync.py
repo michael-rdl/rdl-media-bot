@@ -3,9 +3,11 @@ Reusable sync logic for pulling events, sessions, and runs from rdl-base.
 Called by the sync_events management command and the dashboard sync view.
 """
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 
+import requests as _requests
+from django.conf import settings
 from django.utils.dateparse import parse_datetime
 
 from .models import Event, Run, Session
@@ -96,15 +98,21 @@ def _sync_runs_for_event(event: Event, session_name_map: dict) -> int:
     if not event_runs:
         return 0
 
-    existing_ids = set(
-        Run.objects.filter(event=event).values_list("rdl_run_id", flat=True)
+    unmatched_ids = set(
+        Run.objects.filter(event=event, session__isnull=True)
+        .values_list("rdl_run_id", flat=True)
     )
-    new_runs = [r for r in event_runs if r["id"] not in existing_ids]
+    matched_ids = set(
+        Run.objects.filter(event=event, session__isnull=False)
+        .values_list("rdl_run_id", flat=True)
+    )
+    # Fetch details for runs that are new or still unmatched to a session
+    new_runs = [r for r in event_runs if r["id"] not in matched_ids]
 
     if not new_runs:
         return 0
 
-    logger.info("Fetching details for %d new runs (event %d)...", len(new_runs), event.rdl_event_id)
+    logger.info("Fetching details for %d runs (event %d)...", len(new_runs), event.rdl_event_id)
 
     run_details = {}
     with ThreadPoolExecutor(max_workers=RUN_DETAIL_WORKERS) as pool:
@@ -218,9 +226,44 @@ def _fetch_event_detail(event_id: int) -> dict | None:
     return None
 
 
+_thread_local = threading.local()
+
+
+def _get_thread_session() -> _requests.Session:
+    """Each worker thread gets its own requests.Session with auth cookies."""
+    if not hasattr(_thread_local, "session"):
+        s = _requests.Session()
+        s.headers["Content-Type"] = "application/json"
+
+        api_url = settings.RDL_BASE_API_URL.rstrip("/")
+        email = getattr(settings, "RDL_API_USERNAME", "")
+        password = getattr(settings, "RDL_API_PASSWORD", "")
+
+        if settings.RDL_INTERNAL_API_KEY:
+            s.headers["X-Internal-Key"] = settings.RDL_INTERNAL_API_KEY
+        elif email and password:
+            try:
+                resp = s.post(
+                    f"{api_url}/auth/login/",
+                    json={"email": email, "password": password},
+                    headers={"Referer": api_url},
+                    timeout=15,
+                )
+                if resp.status_code != 200:
+                    logger.warning("Thread auth failed: %d", resp.status_code)
+            except Exception as exc:
+                logger.warning("Thread auth error: %s", exc)
+
+        _thread_local.session = s
+    return _thread_local.session
+
+
 def _fetch_run_detail(run_id: int) -> dict | None:
+    """Fetch run detail using a thread-local requests session."""
     try:
-        resp = api_get(f"/run/{run_id}/")
+        session = _get_thread_session()
+        api_url = settings.RDL_BASE_API_URL.rstrip("/")
+        resp = session.get(f"{api_url}/run/{run_id}/", timeout=15)
         if resp.status_code == 200:
             data = resp.json()
             return {
@@ -230,6 +273,6 @@ def _fetch_run_detail(run_id: int) -> dict | None:
                 "run_type": data.get("run_type", ""),
                 "created": data.get("created"),
             }
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Run %d detail failed: %s", run_id, exc)
     return None
