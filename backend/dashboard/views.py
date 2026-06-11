@@ -6,7 +6,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from pipeline.models import ContentTemplate, Event, Job, Session, StreamSource
+from pipeline.models import ContentTemplate, Event, Job, Run, Session, StreamSource
 from pipeline.rdl_client import api_get
 from pipeline.sync import sync_events_from_rdl
 
@@ -216,7 +216,8 @@ def event_sync(request):
         f"Synced: {counts['events_created']} events created, "
         f"{counts['events_updated']} updated. "
         f"{counts['sessions_created']} sessions created, "
-        f"{counts['sessions_updated']} updated."
+        f"{counts['sessions_updated']} updated. "
+        f"{counts['runs_synced']} runs synced."
     )
     request.session["sync_message"] = msg
     return redirect("dashboard:event-list")
@@ -226,28 +227,13 @@ def event_detail(request, event_id):
     event = get_object_or_404(Event, id=event_id)
     sessions = event.sessions.annotate(
         job_count=models.Count("jobs"),
+        run_count=models.Count("runs"),
     ).all()
-
-    runs = []
-    try:
-        resp = api_get("/run/")
-        if resp.status_code == 200:
-            data = resp.json()
-            all_runs = data if isinstance(data, list) else data.get("results", [])
-            runs = [r for r in all_runs if r.get("event_id") == event.rdl_event_id]
-    except Exception:
-        pass
-
-    existing_run_ids = set(
-        Job.objects.filter(rdl_run_id__in=[r["id"] for r in runs])
-        .values_list("rdl_run_id", flat=True)
-    ) if runs else set()
 
     return render(request, "dashboard/event_detail.html", {
         "event": event,
         "sessions": sessions,
-        "runs": runs,
-        "existing_run_ids": existing_run_ids,
+        "total_runs": Run.objects.filter(event=event).count(),
     })
 
 
@@ -278,12 +264,18 @@ def session_detail(request, session_id):
         Session.objects.select_related("event"),
         id=session_id,
     )
+    runs = session.runs.all()
     jobs = session.jobs.prefetch_related(
         "pieces__publish_results",
     ).all()[:100]
+
+    job_run_ids = set(jobs.values_list("rdl_run_id", flat=True))
+
     return render(request, "dashboard/session_detail.html", {
         "session": session,
+        "runs": runs,
         "jobs": jobs,
+        "job_run_ids": job_run_ids,
     })
 
 

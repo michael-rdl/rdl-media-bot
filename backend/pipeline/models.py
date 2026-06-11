@@ -88,6 +88,24 @@ class Session(models.Model):
         return f"{self.event.name} - {self.name}"
 
 
+class Run(models.Model):
+    """Cached run data from rdl-base, linked to a session."""
+    rdl_run_id = models.PositiveIntegerField(unique=True)
+    session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name="runs", null=True, blank=True)
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="runs")
+    description = models.CharField(max_length=500, blank=True)
+    run_type = models.CharField(max_length=50, blank=True)
+    run_number = models.PositiveIntegerField(null=True, blank=True)
+    rdl_created_at = models.DateTimeField(null=True, blank=True)
+    synced_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-rdl_run_id"]
+
+    def __str__(self):
+        return f"Run {self.rdl_run_id}: {self.description}"
+
+
 class StreamSource(models.Model):
     label = models.CharField(max_length=200)
     url = models.URLField(help_text="YouTube stream or VOD URL")

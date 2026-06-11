@@ -4,7 +4,7 @@
 {% block content %}
 <hgroup>
     <h2>{{ event.name }}</h2>
-    <p>{{ event.event_type }} &middot; rdl_event_id={{ event.rdl_event_id }}</p>
+    <p>{{ event.event_type }} &middot; rdl_event_id={{ event.rdl_event_id }} &middot; {{ total_runs }} runs synced</p>
 </hgroup>
 
 <section>
@@ -37,6 +37,7 @@
             <tr>
                 <th>Session</th>
                 <th>Status</th>
+                <th>Runs</th>
                 <th>Jobs</th>
                 <th>Last Run Seen</th>
                 <th>Actions</th>
@@ -53,6 +54,7 @@
                         <span class="status-badge" style="background: #e9ecef; color: #6c757d;">Inactive</span>
                     {% endif %}
                 </td>
+                <td>{{ session.run_count }}</td>
                 <td>{{ session.job_count }}</td>
                 <td>{{ session.last_run_seen_at|date:"d M Y H:i"|default:"Never" }}</td>
                 <td>
@@ -70,54 +72,6 @@
     </figure>
     {% else %}
     <p>No sessions found. Try syncing events first.</p>
-    {% endif %}
-</section>
-
-<section>
-    <h3>Runs ({{ runs|length }})</h3>
-    {% if runs %}
-    <figure>
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Description</th>
-                <th>Type</th>
-                <th>Job</th>
-                <th>Created</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for run in runs %}
-            <tr>
-                <td>{{ run.id }}</td>
-                <td>{{ run.description|default:"-" }}</td>
-                <td>{{ run.run_type|default:"-" }}</td>
-                <td>
-                    {% if run.id in existing_run_ids %}
-                        <span class="status-badge status-done">Created</span>
-                    {% else %}
-                        <span class="status-badge" style="background: #e9ecef; color: #6c757d;">None</span>
-                    {% endif %}
-                </td>
-                <td>{{ run.created }}</td>
-                <td>
-                    {% if run.id not in existing_run_ids %}
-                    <form method="post" action="{% url 'dashboard:test-generate' run.id %}" style="display: inline;">
-                        {% csrf_token %}
-                        <button type="submit" class="outline" style="padding: 0.2rem 0.5rem; font-size: 0.8rem;">Generate</button>
-                    </form>
-                    {% endif %}
-                    <a href="https://fd.racedatalabs.com/review/{{ run.id }}" target="_blank" style="font-size: 0.8rem;">Preview</a>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    </figure>
-    {% else %}
-    <p>No runs found for this event.</p>
     {% endif %}
 </section>
 

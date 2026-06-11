@@ -32,8 +32,58 @@
 </section>
 
 <section>
-    <h3>Jobs</h3>
-    {% if jobs %}
+    <h3>Runs ({{ runs|length }})</h3>
+    {% if runs %}
+    <figure>
+    <table>
+        <thead>
+            <tr>
+                <th>Run ID</th>
+                <th>Description</th>
+                <th>Type</th>
+                <th>#</th>
+                <th>Job</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in runs %}
+            <tr>
+                <td>{{ run.rdl_run_id }}</td>
+                <td>{{ run.description|default:"-" }}</td>
+                <td>{{ run.run_type|default:"-" }}</td>
+                <td>{{ run.run_number|default:"-" }}</td>
+                <td>
+                    {% if run.rdl_run_id in job_run_ids %}
+                        <span class="status-badge status-done">Created</span>
+                    {% else %}
+                        <span class="status-badge" style="background: #e9ecef; color: #6c757d;">None</span>
+                    {% endif %}
+                </td>
+                <td>{{ run.rdl_created_at|date:"d M H:i"|default:"-" }}</td>
+                <td>
+                    {% if run.rdl_run_id not in job_run_ids %}
+                    <form method="post" action="{% url 'dashboard:test-generate' run.rdl_run_id %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="outline" style="padding: 0.2rem 0.5rem; font-size: 0.8rem;">Generate</button>
+                    </form>
+                    {% endif %}
+                    <a href="https://fd.racedatalabs.com/review/{{ run.rdl_run_id }}" target="_blank" style="font-size: 0.8rem;">Preview</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+    {% else %}
+    <p>No runs synced for this session yet. Click "Sync Events / Sessions" on the <a href="{% url 'dashboard:event-list' %}">events page</a> to pull runs.</p>
+    {% endif %}
+</section>
+
+{% if jobs %}
+<section>
+    <h3>Jobs ({{ jobs|length }})</h3>
     <figure>
     <table>
         <thead>
@@ -70,10 +120,8 @@
         </tbody>
     </table>
     </figure>
-    {% else %}
-    <p>No jobs for this session yet.{% if not session.is_live %} Enable "Live Auto-Push" to start capturing runs automatically.{% endif %}</p>
-    {% endif %}
 </section>
+{% endif %}
 
 <p><a href="{% url 'dashboard:event-detail' session.event.id %}">&larr; Back to {{ session.event.name }}</a></p>
 {% endblock %}
