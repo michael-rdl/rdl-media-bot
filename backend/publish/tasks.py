@@ -29,12 +29,16 @@ def publish_content(job_id: int):
     caption = _build_caption(job)
     ig_handles = _extract_instagram_handles(job.run_metadata)
 
+    ig_post_id = None
     if settings.INSTAGRAM_ACCESS_TOKEN:
-        _publish_instagram_graph(job, story_piece, video_path, caption)
+        ig_post_id = _publish_instagram_graph(job, story_piece, video_path, caption)
     elif settings.INSTAGRAM_USERNAME:
-        _publish_instagram_private(job, story_piece, video_path, caption, ig_handles)
+        ig_post_id = _publish_instagram_private(job, story_piece, video_path, caption, ig_handles)
     else:
         logger.warning("Job #%d: no Instagram credentials configured, skipping", job_id)
+
+    if ig_post_id and not job.publish_as_reel:
+        _add_to_event_highlight(job, ig_post_id)
 
     if settings.YOUTUBE_OAUTH_TOKEN_FILE:
         _publish_youtube(job, story_piece, video_path, caption)
@@ -70,6 +74,7 @@ def _publish_instagram_graph(job, story_piece, video_path, caption):
         pr.published_at = timezone.now()
         pr.save()
         logger.info("Job #%d: published to IG (%s): %s", job.id, media_type, result.get("url"))
+        return result["post_id"]
     except Exception as exc:
         pr.status = PublishResult.Status.FAILED
         pr.error_message = str(exc)[:2000]
@@ -111,6 +116,7 @@ def _publish_instagram_private(job, story_piece, video_path, caption, ig_handles
         pr.published_at = timezone.now()
         pr.save()
         logger.info("Job #%d: published to IG via instagrapi: %s", job.id, result.get("url"))
+        return result["post_id"]
     except Exception as exc:
         pr.status = PublishResult.Status.FAILED
         pr.error_message = str(exc)[:2000]
@@ -150,6 +156,45 @@ def _publish_youtube(job, story_piece, video_path, caption):
         pr.save()
         logger.exception("Job #%d: YouTube publish failed", job.id)
         raise
+
+
+def _add_to_event_highlight(job, story_post_id: str):
+    """
+    If the job's session's event has a highlight configured,
+    add the published story to it. Creates the highlight on first use
+    if it was marked as "pending".
+    """
+    session = getattr(job, "session", None)
+    if not session:
+        return
+
+    event = session.event
+    if not event.ig_highlight_pk:
+        return
+
+    if not settings.INSTAGRAM_USERNAME:
+        logger.warning("Job #%d: no instagrapi credentials for highlight", job.id)
+        return
+
+    try:
+        from .instagram import InstagramHighlightManager
+        mgr = InstagramHighlightManager()
+
+        if event.ig_highlight_pk == "pending":
+            result = mgr.create_highlight(
+                title=event.name[:16],
+                story_media_ids=[story_post_id],
+            )
+            event.ig_highlight_pk = result["highlight_pk"]
+            event.ig_highlight_url = result["url"]
+            event.save(update_fields=["ig_highlight_pk", "ig_highlight_url"])
+            logger.info("Job #%d: created highlight for event %d: %s", job.id, event.id, result["url"])
+        else:
+            mgr.add_to_highlight(event.ig_highlight_pk, [story_post_id])
+            logger.info("Job #%d: added story to highlight %s", job.id, event.ig_highlight_pk)
+
+    except Exception as exc:
+        logger.exception("Job #%d: failed to add to highlight: %s", job.id, exc)
 
 
 def _build_caption(job) -> str:

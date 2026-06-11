@@ -1,12 +1,14 @@
 import logging
 
 from django.conf import settings as django_settings
+from django.db import models
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from pipeline.models import ContentTemplate, Job, StreamSource
+from pipeline.models import ContentTemplate, Event, Job, Session, StreamSource
 from pipeline.rdl_client import api_get
+from pipeline.sync import sync_events_from_rdl
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +201,83 @@ def test_generate(request, run_id):
     job.save(update_fields=["celery_task_id"])
 
     return redirect("dashboard:job-detail", job_id=job.id)
+
+
+def event_list(request):
+    events = Event.objects.prefetch_related("sessions").all()
+    return render(request, "dashboard/event_list.html", {"events": events})
+
+
+@require_POST
+def event_sync(request):
+    counts = sync_events_from_rdl()
+    # Store a summary message in the session for display after redirect
+    msg = (
+        f"Synced: {counts['events_created']} events created, "
+        f"{counts['events_updated']} updated. "
+        f"{counts['sessions_created']} sessions created, "
+        f"{counts['sessions_updated']} updated."
+    )
+    request.session["sync_message"] = msg
+    return redirect("dashboard:event-list")
+
+
+def event_detail(request, event_id):
+    event = get_object_or_404(Event, id=event_id)
+    sessions = event.sessions.annotate(
+        job_count=models.Count("jobs"),
+    ).all()
+    return render(request, "dashboard/event_detail.html", {
+        "event": event,
+        "sessions": sessions,
+    })
+
+
+@require_POST
+def event_create_highlight(request, event_id):
+    event = get_object_or_404(Event, id=event_id)
+
+    if event.ig_highlight_pk:
+        return redirect("dashboard:event-detail", event_id=event.id)
+
+    try:
+        from publish.instagram import InstagramHighlightManager
+        mgr = InstagramHighlightManager()
+        # Need at least one story to create a highlight -- use a placeholder
+        # For now, we'll create when the first story is published
+        # Just store intent; actual creation deferred to first publish
+        event.ig_highlight_pk = "pending"
+        event.save(update_fields=["ig_highlight_pk"])
+        logger.info("Marked event %d for highlight creation on first publish", event.id)
+    except Exception as exc:
+        logger.exception("Failed to set up highlight for event %d", event.id)
+
+    return redirect("dashboard:event-detail", event_id=event.id)
+
+
+def session_detail(request, session_id):
+    session = get_object_or_404(
+        Session.objects.select_related("event"),
+        id=session_id,
+    )
+    jobs = session.jobs.prefetch_related(
+        "pieces__publish_results",
+    ).all()[:100]
+    return render(request, "dashboard/session_detail.html", {
+        "session": session,
+        "jobs": jobs,
+    })
+
+
+@require_POST
+def session_toggle_live(request, session_id):
+    from django.utils import timezone
+    session = get_object_or_404(Session, id=session_id)
+    session.is_live = not session.is_live
+    if session.is_live and not session.last_run_seen_at:
+        session.last_run_seen_at = timezone.now()
+    session.save(update_fields=["is_live", "last_run_seen_at"])
+    return redirect("dashboard:session-detail", session_id=session.id)
 
 
 def settings_view(request):

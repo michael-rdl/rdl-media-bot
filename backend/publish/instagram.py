@@ -191,3 +191,105 @@ class InstagrapiPublisher(ContentPublisher):
             "post_id": str(result.pk),
             "url": f"https://www.instagram.com/p/{result.code}/",
         }
+
+
+class InstagramHighlightManager:
+    """
+    Manage Instagram Story Highlights via instagrapi (private API).
+    Not wired into the publish pipeline -- call directly when needed.
+    """
+
+    def __init__(self):
+        self.username = settings.INSTAGRAM_USERNAME
+        self.password = settings.INSTAGRAM_PASSWORD
+
+        if not self.username or not self.password:
+            raise RuntimeError("Instagram credentials not configured for highlights")
+
+    def _get_client(self):
+        from instagrapi import Client
+
+        cl = Client()
+        cl.login(self.username, self.password)
+        return cl
+
+    def create_highlight(
+        self,
+        title: str,
+        story_media_ids: list[str],
+        cover_story_id: str = "",
+    ) -> dict:
+        """
+        Create a new highlight from one or more published story media IDs.
+
+        Returns dict with highlight_pk, highlight_id, title, and url.
+        """
+        cl = self._get_client()
+        highlight = cl.highlight_create(
+            title=title,
+            story_ids=story_media_ids,
+            cover_story_id=cover_story_id,
+        )
+
+        logger.info("Created IG highlight '%s' (pk=%s)", title, highlight.pk)
+
+        return {
+            "highlight_pk": str(highlight.pk),
+            "highlight_id": highlight.id,
+            "title": highlight.title,
+            "url": f"https://www.instagram.com/stories/highlights/{highlight.pk}/",
+        }
+
+    def add_to_highlight(
+        self,
+        highlight_pk: str,
+        story_media_ids: list[str],
+    ) -> dict:
+        """Add stories to an existing highlight."""
+        cl = self._get_client()
+        highlight = cl.highlight_add_stories(highlight_pk, story_media_ids)
+
+        logger.info(
+            "Added %d stories to highlight %s", len(story_media_ids), highlight_pk,
+        )
+
+        return {
+            "highlight_pk": str(highlight.pk),
+            "highlight_id": highlight.id,
+            "title": highlight.title,
+            "url": f"https://www.instagram.com/stories/highlights/{highlight.pk}/",
+        }
+
+    def get_highlights(self) -> list[dict]:
+        """List all highlights for the authenticated account."""
+        cl = self._get_client()
+        user_id = cl.user_id_from_username(self.username)
+        highlights = cl.user_highlights(user_id)
+
+        return [
+            {
+                "highlight_pk": str(h.pk),
+                "highlight_id": h.id,
+                "title": h.title,
+                "url": f"https://www.instagram.com/stories/highlights/{h.pk}/",
+            }
+            for h in highlights
+        ]
+
+    def find_or_create_highlight(
+        self,
+        title: str,
+        story_media_ids: list[str],
+    ) -> dict:
+        """
+        Add stories to a highlight with the given title, creating it if
+        it doesn't exist yet. Useful for accumulating stories into a
+        rolling highlight like "Latest Runs".
+        """
+        existing = self.get_highlights()
+        for h in existing:
+            if h["title"] == title:
+                logger.info("Found existing highlight '%s' (pk=%s)", title, h["highlight_pk"])
+                return self.add_to_highlight(h["highlight_pk"], story_media_ids)
+
+        return self.create_highlight(title, story_media_ids)

@@ -94,6 +94,12 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    "poll-live-sessions": {
+        "task": "pipeline.tasks.poll_live_sessions",
+        "schedule": 30.0,
+    },
+}
 
 # --- rdl-base integration ---
 RDL_BASE_URL = os.environ.get("RDL_BASE_URL", "https://fd.racedatalabs.com")

@@ -1,0 +1,65 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Events - RDL Media Bot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Events</h2>
+    <p>Events and sessions synced from rdl-base</p>
+</hgroup>
+
+<div style="margin-bottom: 2rem;">
+    <form method="post" action="{% url 'dashboard:event-sync' %}" style="display: inline;">
+        {% csrf_token %}
+        <button type="submit">Sync Events / Sessions</button>
+    </form>
+</div>
+
+{% if request.session.sync_message %}
+<p><mark>{{ request.session.sync_message }}</mark></p>
+{% endif %}
+
+{% if events %}
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>Event</th>
+            <th>Type</th>
+            <th>Sessions</th>
+            <th>Highlight</th>
+            <th>Live</th>
+            <th>Created</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for event in events %}
+        <tr>
+            <td><a href="{% url 'dashboard:event-detail' event.id %}">{{ event.name }}</a></td>
+            <td>{{ event.event_type }}</td>
+            <td>{{ event.sessions.count }}</td>
+            <td>
+                {% if event.ig_highlight_pk and event.ig_highlight_pk != "pending" %}
+                    <span class="status-badge status-done">Yes</span>
+                {% elif event.ig_highlight_pk == "pending" %}
+                    <span class="status-badge status-composing">Pending</span>
+                {% else %}
+                    <span class="status-badge status-failed">No</span>
+                {% endif %}
+            </td>
+            <td>
+                {% for session in event.sessions.all %}
+                    {% if session.is_live %}
+                        <span class="status-badge status-publishing">{{ session.name }}</span>
+                    {% endif %}
+                {% endfor %}
+            </td>
+            <td>{{ event.created_at|date:"d M Y" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p>No events synced yet. Click "Sync Events / Sessions" to pull from rdl-base.</p>
+{% endif %}
+{% endblock %}

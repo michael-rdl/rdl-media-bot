@@ -1,0 +1,79 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ session }} - RDL Media Bot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>{{ session.name }}</h2>
+    <p>
+        <a href="{% url 'dashboard:event-detail' session.event.id %}">{{ session.event.name }}</a>
+        &middot; rdl_session_id={{ session.rdl_session_id }}
+    </p>
+</hgroup>
+
+<section>
+    <h3>Live Auto-Push</h3>
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+        {% if session.is_live %}
+            <span class="status-badge status-publishing">Live - Auto Push Active</span>
+            <span>Polling every 30s &middot; Last run seen: {{ session.last_run_seen_at|date:"d M H:i:s"|default:"Waiting..." }}</span>
+        {% else %}
+            <span class="status-badge" style="background: #e9ecef; color: #6c757d;">Inactive</span>
+            <span>Auto-push is off for this session.</span>
+        {% endif %}
+    </div>
+    <form method="post" action="{% url 'dashboard:session-toggle-live' session.id %}">
+        {% csrf_token %}
+        {% if session.is_live %}
+            <button type="submit" class="secondary outline">Stop Live Auto-Push</button>
+        {% else %}
+            <button type="submit">Start Live Auto-Push</button>
+        {% endif %}
+    </form>
+</section>
+
+<section>
+    <h3>Jobs</h3>
+    {% if jobs %}
+    <figure>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Driver</th>
+                <th>Run</th>
+                <th>Status</th>
+                <th>Published</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in jobs %}
+            <tr>
+                <td><a href="{% url 'dashboard:job-detail' job.id %}">{{ job.id }}</a></td>
+                <td>{{ job.driver_name|default:"-" }}</td>
+                <td>{{ job.run_number|default:"-" }}</td>
+                <td><span class="status-badge status-{{ job.status }}">{{ job.get_status_display }}</span></td>
+                <td>
+                    {% for piece in job.pieces.all %}
+                        {% for pr in piece.publish_results.all %}
+                            {% if pr.status == "published" %}
+                                <span class="status-badge status-done">{{ pr.get_platform_display }}</span>
+                            {% endif %}
+                        {% endfor %}
+                    {% empty %}
+                        -
+                    {% endfor %}
+                </td>
+                <td>{{ job.created_at|date:"d M H:i" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+    {% else %}
+    <p>No jobs for this session yet.{% if not session.is_live %} Enable "Live Auto-Push" to start capturing runs automatically.{% endif %}</p>
+    {% endif %}
+</section>
+
+<p><a href="{% url 'dashboard:event-detail' session.event.id %}">&larr; Back to {{ session.event.name }}</a></p>
+{% endblock %}

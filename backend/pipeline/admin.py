@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import ContentPiece, ContentTemplate, Driver, Job, PublishResult, Sponsor, StreamSource
+from .models import ContentPiece, ContentTemplate, Driver, Event, Job, Organisation, PublishResult, Session, Sponsor, StreamSource
 
 
 class SponsorInline(admin.TabularInline):
@@ -59,6 +59,33 @@ class ContentPieceAdmin(admin.ModelAdmin):
 class PublishResultAdmin(admin.ModelAdmin):
     list_display = ("id", "content_piece", "platform", "status", "published_at")
     list_filter = ("platform", "status")
+
+
+@admin.register(Organisation)
+class OrganisationAdmin(admin.ModelAdmin):
+    list_display = ("name", "updated_at")
+    search_fields = ("name",)
+
+
+class SessionInline(admin.TabularInline):
+    model = Session
+    extra = 0
+    readonly_fields = ("rdl_session_id", "is_live", "last_run_seen_at", "last_polled_run_id")
+
+
+@admin.register(Event)
+class EventAdmin(admin.ModelAdmin):
+    list_display = ("name", "event_type", "rdl_event_id", "ig_highlight_pk", "created_at")
+    search_fields = ("name",)
+    list_filter = ("event_type",)
+    inlines = [SessionInline]
+
+
+@admin.register(Session)
+class SessionAdmin(admin.ModelAdmin):
+    list_display = ("__str__", "rdl_session_id", "is_live", "last_run_seen_at", "created_at")
+    list_filter = ("is_live", "event")
+    search_fields = ("name", "event__name")
 
 
 @admin.register(StreamSource)

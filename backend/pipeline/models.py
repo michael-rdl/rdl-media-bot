@@ -42,6 +42,52 @@ class Sponsor(models.Model):
         return f"{self.name} (sponsor of {self.driver})"
 
 
+class Organisation(models.Model):
+    name = models.CharField(max_length=200)
+    photo = models.ImageField(upload_to="organisations/", blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class Event(models.Model):
+    rdl_event_id = models.PositiveIntegerField(unique=True)
+    name = models.CharField(max_length=200)
+    event_type = models.CharField(max_length=50, blank=True)
+    ig_highlight_pk = models.CharField(max_length=255, blank=True)
+    ig_highlight_url = models.URLField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.name
+
+
+class Session(models.Model):
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="sessions")
+    rdl_session_id = models.PositiveIntegerField(unique=True)
+    name = models.CharField(max_length=200)
+    is_live = models.BooleanField(default=False)
+    last_run_seen_at = models.DateTimeField(null=True, blank=True)
+    last_polled_run_id = models.PositiveIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.event.name} - {self.name}"
+
+
 class StreamSource(models.Model):
     label = models.CharField(max_length=200)
     url = models.URLField(help_text="YouTube stream or VOD URL")
@@ -105,6 +151,13 @@ class Job(models.Model):
 
     rdl_run_id = models.IntegerField(db_index=True)
     event_session_id = models.IntegerField(null=True, blank=True)
+    session = models.ForeignKey(
+        "Session",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="jobs",
+    )
     driver_name = models.CharField(max_length=200, blank=True)
     run_number = models.CharField(max_length=50, blank=True)
 

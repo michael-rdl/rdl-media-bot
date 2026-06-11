@@ -1,0 +1,77 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ event.name }} - RDL Media Bot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>{{ event.name }}</h2>
+    <p>{{ event.event_type }} &middot; rdl_event_id={{ event.rdl_event_id }}</p>
+</hgroup>
+
+<section>
+    <h3>Instagram Highlight</h3>
+    {% if event.ig_highlight_url %}
+        <p>
+            <span class="status-badge status-done">Active</span>
+            <a href="{{ event.ig_highlight_url }}" target="_blank">{{ event.ig_highlight_url }}</a>
+        </p>
+    {% elif event.ig_highlight_pk == "pending" %}
+        <p>
+            <span class="status-badge status-composing">Pending</span>
+            Highlight will be created when the first story is published for this event.
+        </p>
+    {% else %}
+        <p>No highlight created yet for this event.</p>
+        <form method="post" action="{% url 'dashboard:event-create-highlight' event.id %}">
+            {% csrf_token %}
+            <button type="submit" class="secondary">Create Highlight</button>
+        </form>
+    {% endif %}
+</section>
+
+<section>
+    <h3>Sessions</h3>
+    {% if sessions %}
+    <figure>
+    <table>
+        <thead>
+            <tr>
+                <th>Session</th>
+                <th>Status</th>
+                <th>Jobs</th>
+                <th>Last Run Seen</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for session in sessions %}
+            <tr>
+                <td><a href="{% url 'dashboard:session-detail' session.id %}">{{ session.name }}</a></td>
+                <td>
+                    {% if session.is_live %}
+                        <span class="status-badge status-publishing">Live</span>
+                    {% else %}
+                        <span class="status-badge" style="background: #e9ecef; color: #6c757d;">Inactive</span>
+                    {% endif %}
+                </td>
+                <td>{{ session.job_count }}</td>
+                <td>{{ session.last_run_seen_at|date:"d M Y H:i"|default:"Never" }}</td>
+                <td>
+                    <form method="post" action="{% url 'dashboard:session-toggle-live' session.id %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="{% if session.is_live %}secondary{% endif %} outline" style="padding: 0.2rem 0.5rem; font-size: 0.8rem;">
+                            {% if session.is_live %}Stop Live{% else %}Go Live{% endif %}
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+    {% else %}
+    <p>No sessions found. Try syncing events first.</p>
+    {% endif %}
+</section>
+
+<p><a href="{% url 'dashboard:event-list' %}">&larr; Back to Events</a></p>
+{% endblock %}
