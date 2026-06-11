@@ -15,7 +15,7 @@ from .rdl_client import api_get
 
 logger = logging.getLogger(__name__)
 
-RUN_DETAIL_WORKERS = 20
+RUN_DETAIL_WORKERS = 5
 
 
 def sync_events_from_rdl() -> dict:
@@ -23,6 +23,9 @@ def sync_events_from_rdl() -> dict:
     Fetch all events, sessions, and runs from the rdl-base API and upsert
     them into local tables.
     """
+    global _auth_cookies
+    _auth_cookies = None
+
     counts = {
         "events_created": 0,
         "events_updated": 0,
@@ -226,44 +229,59 @@ def _fetch_event_detail(event_id: int) -> dict | None:
     return None
 
 
-_thread_local = threading.local()
+_auth_cookies = None
 
 
-def _get_thread_session() -> _requests.Session:
-    """Each worker thread gets its own requests.Session with auth cookies."""
-    if not hasattr(_thread_local, "session"):
-        s = _requests.Session()
-        s.headers["Content-Type"] = "application/json"
+def _get_auth_cookies() -> dict:
+    """Authenticate once and cache cookies for all threads."""
+    global _auth_cookies
+    if _auth_cookies is not None:
+        return _auth_cookies
 
-        api_url = settings.RDL_BASE_API_URL.rstrip("/")
-        email = getattr(settings, "RDL_API_USERNAME", "")
-        password = getattr(settings, "RDL_API_PASSWORD", "")
+    _auth_cookies = {}
+    api_url = settings.RDL_BASE_API_URL.rstrip("/")
 
-        if settings.RDL_INTERNAL_API_KEY:
-            s.headers["X-Internal-Key"] = settings.RDL_INTERNAL_API_KEY
-        elif email and password:
-            try:
-                resp = s.post(
-                    f"{api_url}/auth/login/",
-                    json={"email": email, "password": password},
-                    headers={"Referer": api_url},
-                    timeout=15,
-                )
-                if resp.status_code != 200:
-                    logger.warning("Thread auth failed: %d", resp.status_code)
-            except Exception as exc:
-                logger.warning("Thread auth error: %s", exc)
+    if settings.RDL_INTERNAL_API_KEY:
+        _auth_cookies = {"_header": settings.RDL_INTERNAL_API_KEY}
+        return _auth_cookies
 
-        _thread_local.session = s
-    return _thread_local.session
+    email = getattr(settings, "RDL_API_USERNAME", "")
+    password = getattr(settings, "RDL_API_PASSWORD", "")
+    if email and password:
+        try:
+            resp = _requests.post(
+                f"{api_url}/auth/login/",
+                json={"email": email, "password": password},
+                headers={"Content-Type": "application/json", "Referer": api_url},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                _auth_cookies = dict(resp.cookies)
+                logger.info("Authenticated for run detail fetching")
+            else:
+                logger.warning("Auth for run details failed: %d", resp.status_code)
+        except Exception as exc:
+            logger.warning("Auth error: %s", exc)
+
+    return _auth_cookies
 
 
 def _fetch_run_detail(run_id: int) -> dict | None:
-    """Fetch run detail using a thread-local requests session."""
+    """Fetch a single run's detail using shared auth cookies."""
     try:
-        session = _get_thread_session()
         api_url = settings.RDL_BASE_API_URL.rstrip("/")
-        resp = session.get(f"{api_url}/run/{run_id}/", timeout=15)
+        cookies = _get_auth_cookies()
+        headers = {"Content-Type": "application/json"}
+        if "_header" in cookies:
+            headers["X-Internal-Key"] = cookies["_header"]
+            cookies = {}
+
+        resp = _requests.get(
+            f"{api_url}/run/{run_id}/",
+            cookies=cookies,
+            headers=headers,
+            timeout=30,
+        )
         if resp.status_code == 200:
             data = resp.json()
             return {
