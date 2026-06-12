@@ -77,6 +77,11 @@ class Event(models.Model):
     )
     posts_since_last_ad = models.PositiveIntegerField(default=0)
 
+    sfx_entry = models.FileField(upload_to="events/sfx/", blank=True)
+    sfx_zone = models.FileField(upload_to="events/sfx/", blank=True)
+    sfx_score_totals = models.FileField(upload_to="events/sfx/", blank=True)
+    sfx_stats = models.FileField(upload_to="events/sfx/", blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -14,6 +14,7 @@ urlpatterns = [
     path("events/<int:event_id>/", views.event_detail, name="event-detail"),
     path("events/<int:event_id>/audio/", views.event_update_audio, name="event-update-audio"),
     path("events/<int:event_id>/ads/", views.event_update_ads, name="event-update-ads"),
+    path("events/<int:event_id>/sfx/", views.event_update_sfx, name="event-update-sfx"),
     path("events/<int:event_id>/create-highlight/", views.event_create_highlight, name="event-create-highlight"),
     path("sessions/<int:session_id>/", views.session_detail, name="session-detail"),
     path("sessions/<int:session_id>/toggle-live/", views.session_toggle_live, name="session-toggle-live"),

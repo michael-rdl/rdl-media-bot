@@ -58,6 +58,51 @@
 </section>
 
 <section>
+    <h3>Sound Effects</h3>
+    <p style="font-size: 0.85rem; color: #6c757d; margin-bottom: 0.5rem;">
+        One-shot sounds triggered at scene events. If not set, inherits from the most recent event that has sounds.
+    </p>
+    <form method="post" action="{% url 'dashboard:event-update-sfx' event.id %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            {% for slot in sfx_slots %}
+            <div style="border: 1px solid var(--form-element-border-color); border-radius: 8px; padding: 0.8rem;">
+                <strong>{{ slot.label }}</strong>
+                {% if slot.file %}
+                    <div style="margin: 0.4rem 0;">
+                        <audio controls style="width: 100%; max-width: 280px;">
+                            <source src="{{ slot.file.url }}">
+                        </audio>
+                    </div>
+                    <small><code>{{ slot.file.name }}</code></small>
+                    {% if slot.inherited %}
+                        <br><small style="color: #6c757d;">Inherited from {{ slot.inherited_from }}</small>
+                    {% endif %}
+                    <div style="margin-top: 0.3rem;">
+                        <label style="display: flex; align-items: center; gap: 0.4rem; margin: 0; font-size: 0.85rem;">
+                            <input type="checkbox" name="remove_{{ slot.field }}" value="1">
+                            Remove
+                        </label>
+                    </div>
+                {% elif slot.inherited and slot.fallback_file %}
+                    <div style="margin: 0.4rem 0;">
+                        <audio controls style="width: 100%; max-width: 280px;">
+                            <source src="{{ slot.fallback_file.url }}">
+                        </audio>
+                    </div>
+                    <small style="color: #6c757d;">Inherited from {{ slot.inherited_from }}</small>
+                {% else %}
+                    <p style="margin: 0.4rem 0; font-size: 0.85rem; color: #6c757d;">No sound set</p>
+                {% endif %}
+                <input type="file" name="{{ slot.field }}" accept="audio/*" style="font-size: 0.85rem; margin-top: 0.3rem;">
+            </div>
+            {% endfor %}
+        </div>
+        <button type="submit" style="margin-top: 0.8rem;">Save Sound Effects</button>
+    </form>
+</section>
+
+<section>
     <h3>Ad Video</h3>
     <form method="post" action="{% url 'dashboard:event-update-ads' event.id %}" enctype="multipart/form-data">
         {% csrf_token %}

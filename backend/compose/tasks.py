@@ -3,11 +3,34 @@ from pathlib import Path
 
 from django.conf import settings
 
-from pipeline.models import ContentPiece, ContentTemplate, Job
+from pipeline.models import ContentPiece, ContentTemplate, Event, Job
 
 from .editor import compose_story_video
 
 logger = logging.getLogger(__name__)
+
+SFX_FIELDS = ("sfx_entry", "sfx_zone", "sfx_score_totals", "sfx_stats")
+
+
+def _resolve_sfx_paths(event):
+    """Return {slot: Path} for each SFX slot, falling back to the most recent event."""
+    paths = {}
+    for slot in SFX_FIELDS:
+        f = getattr(event, slot)
+        if f:
+            paths[slot] = Path(f.path)
+        else:
+            fallback = (
+                Event.objects.filter(**{f"{slot}__gt": ""})
+                .exclude(id=event.id)
+                .order_by("-created_at")
+                .first()
+            )
+            if fallback:
+                fb = getattr(fallback, slot)
+                if fb:
+                    paths[slot] = Path(fb.path)
+    return paths
 
 
 def compose_story(job_id: int):
@@ -48,10 +71,15 @@ def compose_story(job_id: int):
         logger.info("Job #%d: using event-level audio: %s", job_id, audio_path)
     output_path = media_root / "jobs" / str(job_id) / "story_final.mp4"
 
-    stats = _extract_stats(job.run_metadata)
-    ig_handles = _extract_instagram_handles(job.run_metadata)
-
-    logo_path = Path(template.logo_path) if template.logo_path else None
+    # Resolve SFX one-shots and scene event timestamps
+    sfx_paths = {}
+    scene_events = viz_piece.metadata.get("scene_events", [])
+    if job.session:
+        sfx_paths = _resolve_sfx_paths(job.session.event)
+        if sfx_paths:
+            logger.info("Job #%d: SFX paths: %s", job_id, list(sfx_paths.keys()))
+        if scene_events:
+            logger.info("Job #%d: scene events: %s", job_id, scene_events)
 
     compose_story_video(
         viz_path=viz_path,
@@ -60,11 +88,8 @@ def compose_story(job_id: int):
         width=template.output_width,
         height=template.output_height,
         max_duration=float(template.max_duration_seconds),
-        driver_name=job.driver_name,
-        run_number=job.run_number,
-        stats=stats,
-        logo_path=logo_path,
-        ig_handles=ig_handles,
+        sfx_paths=sfx_paths,
+        scene_events=scene_events,
     )
 
     file_size = output_path.stat().st_size

@@ -230,10 +230,13 @@ def event_detail(request, event_id):
         run_count=models.Count("runs"),
     ).all()
 
+    sfx_slots = _build_sfx_slots(event)
+
     return render(request, "dashboard/event_detail.html", {
         "event": event,
         "sessions": sessions,
         "total_runs": Run.objects.filter(event=event).count(),
+        "sfx_slots": sfx_slots,
     })
 
 
@@ -275,6 +278,74 @@ def event_update_ads(request, event_id):
     event.save(update_fields=[
         "ads_enabled", "ad_frequency", "ad_instagram_handle", "ad_video",
     ])
+
+    return redirect("dashboard:event-detail", event_id=event.id)
+
+
+SFX_SLOTS = [
+    ("sfx_entry", "Entry Popup"),
+    ("sfx_zone", "Zone Popup"),
+    ("sfx_score_totals", "Score Totals"),
+    ("sfx_stats", "Stats"),
+]
+
+
+def _build_sfx_slots(event):
+    """Build template context for the SFX section, with fallback info."""
+    slots = []
+    for field, label in SFX_SLOTS:
+        own_file = getattr(event, field)
+        if own_file:
+            slots.append({
+                "field": field, "label": label,
+                "file": own_file, "inherited": False,
+                "inherited_from": "", "fallback_file": None,
+            })
+        else:
+            fallback_event = (
+                Event.objects.filter(**{f"{field}__gt": ""})
+                .exclude(id=event.id)
+                .order_by("-created_at")
+                .first()
+            )
+            if fallback_event:
+                fb_file = getattr(fallback_event, field)
+                slots.append({
+                    "field": field, "label": label,
+                    "file": None, "inherited": True,
+                    "inherited_from": fallback_event.name,
+                    "fallback_file": fb_file,
+                })
+            else:
+                slots.append({
+                    "field": field, "label": label,
+                    "file": None, "inherited": False,
+                    "inherited_from": "", "fallback_file": None,
+                })
+    return slots
+
+
+@require_POST
+def event_update_sfx(request, event_id):
+    event = get_object_or_404(Event, id=event_id)
+    updated = []
+
+    for field, _label in SFX_SLOTS:
+        if request.POST.get(f"remove_{field}"):
+            f = getattr(event, field)
+            if f:
+                f.delete(save=False)
+            setattr(event, field, "")
+            updated.append(field)
+        elif request.FILES.get(field):
+            f = getattr(event, field)
+            if f:
+                f.delete(save=False)
+            setattr(event, field, request.FILES[field])
+            updated.append(field)
+
+    if updated:
+        event.save(update_fields=updated)
 
     return redirect("dashboard:event-detail", event_id=event.id)
 

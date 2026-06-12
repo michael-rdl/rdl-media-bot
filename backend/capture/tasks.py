@@ -38,7 +38,9 @@ def capture_visualiser(job_id: int):
     job_dir.mkdir(parents=True, exist_ok=True)
     output_path = job_dir / "viz_capture.mp4"
 
-    capture_replay(job.rdl_run_id, output_path, duration, on_progress=_update_progress)
+    _output_path, scene_events = capture_replay(
+        job.rdl_run_id, output_path, duration, on_progress=_update_progress,
+    )
 
     file_size = output_path.stat().st_size
     probe = _probe_video(output_path)
@@ -52,12 +54,16 @@ def capture_visualiser(job_id: int):
             width=probe.get("width", 1920),
             height=probe.get("height", 1080),
             file_size_bytes=file_size,
+            metadata={"scene_events": scene_events},
         )
         relative_path = f"jobs/{job_id}/viz_capture.mp4"
         piece.file.name = relative_path
         piece.save(update_fields=["file"])
 
-    logger.info("Job #%d: viz capture saved as ContentPiece #%d", job_id, piece.id)
+    logger.info(
+        "Job #%d: viz capture saved as ContentPiece #%d (%d scene events)",
+        job_id, piece.id, len(scene_events),
+    )
 
 
 def _fetch_run_metadata(run_id: int) -> dict:
