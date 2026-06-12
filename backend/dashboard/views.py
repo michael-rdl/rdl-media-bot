@@ -6,7 +6,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from pipeline.models import ContentTemplate, Event, Job, Run, Session, StreamSource
+from pipeline.models import ContentTemplate, Driver, Event, Job, Run, Session, StreamSource
 from pipeline.rdl_client import api_get
 from pipeline.sync import sync_events_from_rdl
 
@@ -33,9 +33,12 @@ def job_detail(request, job_id):
     job = get_object_or_404(Job, id=job_id)
     pieces = job.pieces.prefetch_related("publish_results").all()
 
+    ig_handles = _get_job_instagram_handles(job)
+
     return render(request, "dashboard/job_detail.html", {
         "job": job,
         "pieces": pieces,
+        "ig_handles": ig_handles,
     })
 
 
@@ -421,3 +424,36 @@ def settings_view(request):
         "Webhook Secret": "Set" if django_settings.WEBHOOK_SECRET else "Not set",
     }
     return render(request, "dashboard/settings.html", {"config": config})
+
+
+def _get_job_instagram_handles(job):
+    """Extract Instagram handles that will be mentioned in the story.
+
+    Pulls from run_metadata (populated after capture) with a fallback to the
+    local Driver table matched by name.
+    """
+    handles = []
+    metadata = job.run_metadata or {}
+    for side in ("left_run_data", "right_run_data"):
+        rd = metadata.get(side)
+        if not rd or not rd.get("driver"):
+            continue
+        handle = rd["driver"].get("instagram_handle", "")
+        if handle:
+            handles.append(handle)
+
+    if not handles and job.driver_name:
+        parts = job.driver_name.strip().split(None, 1)
+        qs = Driver.objects.exclude(instagram="")
+        if len(parts) == 2:
+            qs = qs.filter(first_name__iexact=parts[0], last_name__iexact=parts[1])
+        else:
+            qs = qs.filter(
+                models.Q(last_name__iexact=job.driver_name)
+                | models.Q(first_name__iexact=job.driver_name)
+            )
+        driver = qs.first()
+        if driver and driver.instagram:
+            handles.append(driver.instagram.lstrip("@"))
+
+    return handles
