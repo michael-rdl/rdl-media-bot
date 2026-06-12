@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from django.conf import settings
@@ -10,6 +11,8 @@ from .browser import capture_replay
 
 logger = logging.getLogger(__name__)
 
+_db_pool = ThreadPoolExecutor(max_workers=1)
+
 
 def capture_visualiser(job_id: int):
     """
@@ -19,7 +22,7 @@ def capture_visualiser(job_id: int):
     job = Job.objects.get(id=job_id)
 
     def _update_progress(msg):
-        Job.objects.filter(id=job_id).update(status_message=msg)
+        _db_pool.submit(Job.objects.filter(id=job_id).update, status_message=msg)
 
     _update_progress("Fetching run metadata...")
     run_data = _fetch_run_metadata(job.rdl_run_id)
