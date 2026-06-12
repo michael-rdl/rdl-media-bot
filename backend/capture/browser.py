@@ -12,8 +12,12 @@ VIEWPORT = {"width": 1080, "height": 1920}
 
 def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> Path:
     """
-    Capture the visualiser replay. Records everything including loading,
-    then trims to just the scene playback using ffmpeg.
+    Capture the video-out scene. Records from page load, then trims to
+    start at the white entry page and end 2s after the final "Stats"
+    card fades in.
+
+    duration_seconds is used only as a safety timeout — the actual end
+    is detected via DOM events.
     """
     from playwright.sync_api import sync_playwright
 
@@ -24,7 +28,9 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
     rec_dir = output_path.parent / "rec"
     rec_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Capturing run %d at %s (%.1fs)", run_id, replay_url, duration_seconds)
+    max_scene_ms = int(max(duration_seconds * 2.5, 120) * 1000)
+
+    logger.info("Capturing run %d at %s (timeout %.0fs)", run_id, replay_url, max_scene_ms / 1000)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False, args=["--headless=new"])
@@ -42,10 +48,10 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
         recording_start = time.monotonic()
         page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
 
-        # Wait for scene to be fully loaded
+        # --- Phase 1: wait for loading modal to disappear ---
         try:
             page.wait_for_selector("#loader", timeout=30_000)
-            logger.info("App loaded, waiting for scene data...")
+            logger.info("Loader visible, waiting for scene data...")
         except Exception:
             if "/login" in page.url:
                 raise RuntimeError(f"Auth failed - redirected to {page.url}")
@@ -65,11 +71,28 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
 
         page.wait_for_timeout(1000)
         trim_seconds = time.monotonic() - recording_start + 6.0
-        logger.info("Scene ready, trimming first %.1fs from recording", trim_seconds)
+        logger.info("Scene started (trim first %.1fs), waiting for end-of-scene...", trim_seconds)
 
-        # Record the actual replay (no extra buffer -- trim handles the start)
-        logger.info("Recording for %.1f seconds...", duration_seconds)
-        time.sleep(duration_seconds - 3)
+        # --- Phase 2: wait for the "Stats" card (second end-of-scene text block) ---
+        try:
+            page.wait_for_function(
+                """() => {
+                    for (const d of document.querySelectorAll('div')) {
+                        if (d.childNodes.length <= 2 &&
+                            d.innerText && d.innerText.trim() === 'Stats' &&
+                            getComputedStyle(d).display !== 'none' &&
+                            getComputedStyle(d).opacity !== '0')
+                            return true;
+                    }
+                    return false;
+                }""",
+                timeout=max_scene_ms,
+            )
+            logger.info("'Stats' card detected — recording 2 more seconds")
+        except Exception:
+            logger.warning("'Stats' card not detected within timeout, stopping anyway")
+
+        time.sleep(2)
 
         page.close()
         context.close()
