@@ -129,7 +129,7 @@ def capture_replay(
             logger.warning("Loader still visible after timeout")
 
         page.wait_for_timeout(1000)
-        trim_seconds = time.monotonic() - recording_start + 6.0
+        trim_seconds = time.monotonic() - recording_start + 7.0
         scene_start = time.monotonic()
         _progress("Recording animation...")
 
