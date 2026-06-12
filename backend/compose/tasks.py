@@ -93,13 +93,19 @@ def compose_story(job_id: int):
         if scene_events:
             logger.info("Job #%d: scene events: %s", job_id, scene_events)
 
+    # Cut 2s after the last scene event (stats), fall back to template max
+    max_duration = float(template.max_duration_seconds)
+    if scene_events:
+        last_event_t = max(evt["t"] for evt in scene_events)
+        max_duration = last_event_t + 2.0
+
     compose_story_video(
         viz_path=viz_path,
         output_path=output_path,
         audio_path=audio_path,
         width=template.output_width,
         height=template.output_height,
-        max_duration=float(template.max_duration_seconds),
+        max_duration=max_duration,
         sfx_paths=sfx_paths,
         scene_events=scene_events,
     )
