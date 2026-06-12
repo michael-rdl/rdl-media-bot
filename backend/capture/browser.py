@@ -213,6 +213,10 @@ def capture_replay(
         f.unlink()
     frames_dir.rmdir()
 
+    # Offset scene event timestamps by 0.5s to account for the first-frame hold
+    for evt in scene_events:
+        evt["t"] = round(evt["t"] + 0.5, 2)
+
     file_mb = output_path.stat().st_size / 1e6
     _progress(f"Capture complete ({file_mb:.1f} MB, {output_fps:.0f}fps)")
     logger.info("Run %d: scene events: %s", run_id, scene_events)
@@ -220,11 +224,12 @@ def capture_replay(
 
 
 def _stitch_frames(frames_dir: Path, output_path: Path, fps: float):
-    """Stitch JPEG screenshots into an MP4 video."""
+    """Stitch JPEG screenshots into an MP4 video with a 0.5s freeze on the first frame."""
     cmd = [
         "ffmpeg", "-y",
         "-framerate", str(fps),
         "-i", str(frames_dir / "frame_%05d.jpg"),
+        "-vf", "tpad=start_duration=0.5:start_mode=clone",
         "-c:v", "libx264",
         "-preset", "medium",
         "-crf", "10",
