@@ -124,7 +124,16 @@ def capture_replay(
             logger.warning("Loader still visible after timeout")
 
         page.wait_for_timeout(2000)
-        _progress("Recording animation (screenshot capture)...")
+
+        # Slow animation to 0.5x so we capture twice as many frames per
+        # second of content, then speed video back up in encoding.
+        page.evaluate("""() => {
+            const origNow = performance.now.bind(performance);
+            const t0 = origNow();
+            performance.now = () => t0 + (origNow() - t0) * 0.5;
+        }""")
+
+        _progress("Recording animation (screenshot capture, 0.5x speed)...")
 
         # --- Phase 2: capture screenshots + poll DOM ---
         seen = set()
@@ -147,30 +156,30 @@ def capture_replay(
 
                 if state.get("entry") and "entry" not in seen:
                     seen.add("entry")
-                    scene_events.append({"type": "entry", "t": round(now, 2)})
-                    logger.info("Run %d: entry popup at %.1fs", run_id, now)
+                    scene_events.append({"type": "entry", "t": round(now * 0.5, 2)})
+                    logger.info("Run %d: entry popup at %.1fs", run_id, now * 0.5)
 
                 zone_visible = state.get("zone", False)
                 if zone_visible and not zone_was_visible:
-                    scene_events.append({"type": "zone", "t": round(now, 2)})
-                    logger.info("Run %d: zone popup at %.1fs", run_id, now)
+                    scene_events.append({"type": "zone", "t": round(now * 0.5, 2)})
+                    logger.info("Run %d: zone popup at %.1fs", run_id, now * 0.5)
                 zone_was_visible = zone_visible
 
                 if state.get("score_totals") and "score_totals" not in seen:
                     seen.add("score_totals")
-                    scene_events.append({"type": "score_totals", "t": round(now, 2)})
-                    logger.info("Run %d: score totals at %.1fs", run_id, now)
+                    scene_events.append({"type": "score_totals", "t": round(now * 0.5, 2)})
+                    logger.info("Run %d: score totals at %.1fs", run_id, now * 0.5)
 
                 if state.get("stats") and "stats" not in seen:
                     seen.add("stats")
-                    scene_events.append({"type": "stats", "t": round(now, 2)})
-                    logger.info("Run %d: stats card at %.1fs", run_id, now)
+                    scene_events.append({"type": "stats", "t": round(now * 0.5, 2)})
+                    logger.info("Run %d: stats card at %.1fs", run_id, now * 0.5)
                     _progress("End-of-scene detected, finishing up...")
                     stats_detected = True
 
             if stats_detected:
-                # Capture 2 more seconds of frames after stats
-                end_time = now + 2.0
+                # Capture 2 more seconds of animation (4s wall-clock at 0.5x)
+                end_time = now + 4.0
                 while (time.monotonic() - scene_start) < end_time:
                     frame_path = frames_dir / f"frame_{frame_count:05d}.jpg"
                     page.screenshot(path=str(frame_path), type="jpeg", quality=95)
@@ -185,18 +194,19 @@ def capture_replay(
         context.close()
         browser.close()
 
-    # Calculate actual framerate achieved
+    # Calculate actual framerate achieved, then double it for output
+    # (animation was at 0.5x speed, so 2x playback restores normal speed)
     total_time = time.monotonic() - scene_start
-    actual_fps = frame_count / total_time if total_time > 0 else 30
-    actual_fps = round(actual_fps, 2)
+    capture_fps = frame_count / total_time if total_time > 0 else 30
+    output_fps = round(capture_fps * 2, 2)
     logger.info(
-        "Run %d: captured %d frames in %.1fs (%.1f fps)",
-        run_id, frame_count, total_time, actual_fps,
+        "Run %d: captured %d frames in %.1fs (%.1f capture fps, %.1f output fps)",
+        run_id, frame_count, total_time, capture_fps, output_fps,
     )
 
     # Stitch frames into MP4
-    _progress(f"Encoding MP4 ({frame_count} frames at {actual_fps:.0f}fps)...")
-    _stitch_frames(frames_dir, output_path, actual_fps)
+    _progress(f"Encoding MP4 ({frame_count} frames at {output_fps:.0f}fps)...")
+    _stitch_frames(frames_dir, output_path, output_fps)
 
     # Cleanup frames
     for f in frames_dir.glob("*.jpg"):
@@ -204,7 +214,7 @@ def capture_replay(
     frames_dir.rmdir()
 
     file_mb = output_path.stat().st_size / 1e6
-    _progress(f"Capture complete ({file_mb:.1f} MB, {actual_fps:.0f}fps)")
+    _progress(f"Capture complete ({file_mb:.1f} MB, {output_fps:.0f}fps)")
     logger.info("Run %d: scene events: %s", run_id, scene_events)
     return output_path, scene_events
 
