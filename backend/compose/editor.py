@@ -83,6 +83,23 @@ def _compose_video_only(viz_path, output_path, width, height, max_duration, fade
     return _run_ffmpeg(cmd, output_path, "video-only")
 
 
+def _compose_bg_audio_only(viz_path, output_path, width, height, max_duration, fade_start, bg_audio_path):
+    """Compose with background audio only (no SFX)."""
+    vf = (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,"
+        f"fade=t=out:st={fade_start:.2f}:d=1:color=black"
+    )
+    cmd = ["ffmpeg", "-y", "-i", str(viz_path), "-i", str(bg_audio_path)]
+    if max_duration > 0:
+        cmd.extend(["-t", str(max_duration)])
+    cmd.extend(["-vf", vf])
+    cmd.extend(["-map", "0:v", "-map", "1:a"])
+    cmd.extend(["-c:a", "aac", "-b:a", "192k", "-shortest"])
+    cmd.extend(_encoding_args(output_path))
+    return _run_ffmpeg(cmd, output_path, "bg audio only")
+
+
 def _compose_with_audio(
     viz_path, output_path, width, height, max_duration,
     fade_start, duration, bg_audio_path, sfx_hits,
@@ -96,6 +113,12 @@ def _compose_with_audio(
       1..N = unique SFX files (each may be reused at multiple delays)
       N+1 = background audio (optional)
     """
+    if not sfx_hits and bg_audio_path:
+        return _compose_bg_audio_only(
+            viz_path, output_path, width, height, max_duration,
+            fade_start, bg_audio_path,
+        )
+
     # Deduplicate SFX files to minimise inputs; map each hit to its input idx
     unique_sfx = {}  # path -> input_idx
     next_idx = 1
@@ -147,10 +170,7 @@ def _compose_with_audio(
         )
         audio_map = "[aout]"
     else:
-        if sfx_out.startswith("[") and sfx_out.endswith("]"):
-            audio_map = sfx_out
-        else:
-            audio_map = sfx_out
+        audio_map = sfx_out
 
     filter_complex = ";\n".join(filters)
 
