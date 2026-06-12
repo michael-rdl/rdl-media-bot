@@ -3,7 +3,7 @@ from pathlib import Path
 
 from django.conf import settings
 
-from pipeline.models import ContentPiece, ContentTemplate, Event, Job
+from pipeline.models import ContentPiece, ContentTemplate, Event, Job, Run
 
 from .editor import compose_story_video
 
@@ -31,6 +31,16 @@ def _resolve_sfx_paths(event):
                 if fb:
                     paths[slot] = Path(fb.path)
     return paths
+
+
+def _resolve_event(job):
+    """Resolve the Event for a job via session or Run table."""
+    if job.session:
+        return job.session.event
+    run = Run.objects.filter(rdl_run_id=job.rdl_run_id).select_related("event").first()
+    if run:
+        return run.event
+    return None
 
 
 def compose_story(job_id: int):
@@ -63,19 +73,21 @@ def compose_story(job_id: int):
     media_root = Path(settings.MEDIA_ROOT)
     viz_path = media_root / viz_piece.file.name
 
+    event = _resolve_event(job)
+
     audio_path = None
     if audio_piece and audio_piece.file:
         audio_path = media_root / audio_piece.file.name
-    elif job.session and job.session.event.audio_file:
-        audio_path = Path(job.session.event.audio_file.path)
+    elif event and event.audio_file:
+        audio_path = Path(event.audio_file.path)
         logger.info("Job #%d: using event-level audio: %s", job_id, audio_path)
     output_path = media_root / "jobs" / str(job_id) / "story_final.mp4"
 
     # Resolve SFX one-shots and scene event timestamps
     sfx_paths = {}
     scene_events = viz_piece.metadata.get("scene_events", [])
-    if job.session:
-        sfx_paths = _resolve_sfx_paths(job.session.event)
+    if event:
+        sfx_paths = _resolve_sfx_paths(event)
         if sfx_paths:
             logger.info("Job #%d: SFX paths: %s", job_id, list(sfx_paths.keys()))
         if scene_events:
