@@ -184,10 +184,10 @@ def _compose_with_audio(
 def _encoding_args(output_path):
     return [
         "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "15",
+        "-preset", "medium",
+        "-crf", "10",
         "-pix_fmt", "yuv420p",
-        "-r", "30",
+        "-r", "60",
         str(output_path),
     ]
 
