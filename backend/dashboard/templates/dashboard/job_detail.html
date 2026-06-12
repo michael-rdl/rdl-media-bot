@@ -11,7 +11,7 @@
     <article style="flex: 1; min-width: 300px;">
         <header>Details</header>
         <table>
-            <tr><td><strong>Status</strong></td><td><span class="status-badge status-{{ job.status }}">{{ job.get_status_display }}</span></td></tr>
+            <tr><td><strong>Status</strong></td><td><span class="status-badge status-{{ job.status }}">{{ job.get_status_display }}</span>{% if job.status_message %}<br><small style="color: #6c757d;">{{ job.status_message }}</small>{% endif %}</td></tr>
             <tr><td><strong>rdl-base Run ID</strong></td><td>{{ job.rdl_run_id }}</td></tr>
             <tr><td><strong>Driver</strong></td><td>{{ job.driver_name|default:"-" }}</td></tr>
             <tr><td><strong>Run Number</strong></td><td>{{ job.run_number|default:"-" }}</td></tr>

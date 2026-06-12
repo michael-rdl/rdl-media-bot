@@ -18,6 +18,10 @@ def capture_visualiser(job_id: int):
     """
     job = Job.objects.get(id=job_id)
 
+    def _update_progress(msg):
+        Job.objects.filter(id=job_id).update(status_message=msg)
+
+    _update_progress("Fetching run metadata...")
     run_data = _fetch_run_metadata(job.rdl_run_id)
     _enrich_driver_instagram(run_data)
     job.run_metadata = run_data
@@ -31,7 +35,7 @@ def capture_visualiser(job_id: int):
     job_dir.mkdir(parents=True, exist_ok=True)
     output_path = job_dir / "viz_capture.mp4"
 
-    capture_replay(job.rdl_run_id, output_path, duration)
+    capture_replay(job.rdl_run_id, output_path, duration, on_progress=_update_progress)
 
     file_size = output_path.stat().st_size
     probe = _probe_video(output_path)

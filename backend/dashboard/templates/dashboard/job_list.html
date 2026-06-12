@@ -34,7 +34,10 @@
             <td>{{ job.id }}</td>
             <td>{{ job.driver_name|default:"-" }}</td>
             <td>{{ job.run_number|default:"-" }}</td>
-            <td><span class="status-badge status-{{ job.status }}">{{ job.get_status_display }}</span></td>
+            <td>
+                <span class="status-badge status-{{ job.status }}">{{ job.get_status_display }}</span>
+                {% if job.status_message %}<br><small style="color: #6c757d;">{{ job.status_message }}</small>{% endif %}
+            </td>
             <td>
                 <div class="pipeline-stages">
                     {% with stages="triggered,capturing,clipping,composing,publishing,done" %}

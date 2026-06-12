@@ -10,7 +10,12 @@ logger = logging.getLogger(__name__)
 VIEWPORT = {"width": 1080, "height": 1920}
 
 
-def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> Path:
+def capture_replay(
+    run_id: int,
+    output_path: Path,
+    duration_seconds: float,
+    on_progress=None,
+) -> Path:
     """
     Capture the video-out scene. Records from page load, then trims to
     start at the white entry page and end 2s after the final "Stats"
@@ -18,8 +23,15 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
 
     duration_seconds is used only as a safety timeout — the actual end
     is detected via DOM events.
+
+    on_progress: optional callable(message: str) invoked at each phase.
     """
     from playwright.sync_api import sync_playwright
+
+    def _progress(msg):
+        logger.info("Run %d: %s", run_id, msg)
+        if on_progress:
+            on_progress(msg)
 
     base_url = settings.RDL_BASE_URL.rstrip("/")
     replay_url = f"{base_url}/video-out/{run_id}"
@@ -30,7 +42,7 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
 
     max_scene_ms = int(max(duration_seconds * 2.5, 120) * 1000)
 
-    logger.info("Capturing run %d at %s (timeout %.0fs)", run_id, replay_url, max_scene_ms / 1000)
+    _progress("Starting browser...")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False, args=["--headless=new"])
@@ -42,16 +54,17 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
         )
         page = context.new_page()
 
+        _progress("Authenticating...")
         _authenticate(page, base_url)
 
-        logger.info("Navigating to replay...")
+        _progress("Loading scene...")
         recording_start = time.monotonic()
         page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
 
         # --- Phase 1: wait for loading modal to disappear ---
         try:
             page.wait_for_selector("#loader", timeout=30_000)
-            logger.info("Loader visible, waiting for scene data...")
+            _progress("Scene data loading...")
         except Exception:
             if "/login" in page.url:
                 raise RuntimeError(f"Auth failed - redirected to {page.url}")
@@ -71,7 +84,7 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
 
         page.wait_for_timeout(1000)
         trim_seconds = time.monotonic() - recording_start + 6.0
-        logger.info("Scene started (trim first %.1fs), waiting for end-of-scene...", trim_seconds)
+        _progress("Recording animation...")
 
         # --- Phase 2: wait for the "Stats" card (second end-of-scene text block) ---
         try:
@@ -88,9 +101,10 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
                 }""",
                 timeout=max_scene_ms,
             )
-            logger.info("'Stats' card detected — recording 2 more seconds")
+            _progress("End-of-scene detected, finishing up...")
         except Exception:
             logger.warning("'Stats' card not detected within timeout, stopping anyway")
+            _progress("Timeout reached, finishing up...")
 
         time.sleep(2)
 
@@ -103,6 +117,7 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
     if not video_files:
         raise RuntimeError(f"No video produced in {rec_dir}")
 
+    _progress("Encoding MP4...")
     raw_video = video_files[0]
     _trim_and_convert(raw_video, output_path, trim_seconds)
     raw_video.unlink(missing_ok=True)
@@ -111,7 +126,8 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
         f.unlink()
     rec_dir.rmdir()
 
-    logger.info("Saved %s (%.1f MB)", output_path, output_path.stat().st_size / 1e6)
+    file_mb = output_path.stat().st_size / 1e6
+    _progress(f"Capture complete ({file_mb:.1f} MB)")
     return output_path
 
 

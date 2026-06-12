@@ -185,6 +185,11 @@ class Job(models.Model):
         default=Status.TRIGGERED,
         db_index=True,
     )
+    status_message = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Live progress message for the current pipeline stage",
+    )
     error_message = models.TextField(blank=True)
     failed_stage = models.CharField(max_length=50, blank=True)
 

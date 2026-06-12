@@ -33,7 +33,8 @@ def run_pipeline(self, job_id):
 
     for status, stage_name, stage_fn in stages:
         job.status = status
-        job.save(update_fields=["status"])
+        job.status_message = ""
+        job.save(update_fields=["status", "status_message"])
         logger.info("Job #%d entering stage: %s", job_id, stage_name)
 
         try:
@@ -43,11 +44,13 @@ def run_pipeline(self, job_id):
             job.status = Job.Status.FAILED
             job.failed_stage = stage_name
             job.error_message = str(exc)[:2000]
-            job.save(update_fields=["status", "failed_stage", "error_message"])
+            job.status_message = f"Failed: {stage_name}"
+            job.save(update_fields=["status", "failed_stage", "error_message", "status_message"])
             return
 
     job.status = Job.Status.DONE
-    job.save(update_fields=["status"])
+    job.status_message = ""
+    job.save(update_fields=["status", "status_message"])
     logger.info("Job #%d completed successfully", job_id)
 
 
