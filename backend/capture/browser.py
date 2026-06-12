@@ -18,7 +18,7 @@ def capture_replay(run_id: int, output_path: Path, duration_seconds: float) -> P
     from playwright.sync_api import sync_playwright
 
     base_url = settings.RDL_BASE_URL.rstrip("/")
-    replay_url = f"{base_url}/review/{run_id}"
+    replay_url = f"{base_url}/video-out/{run_id}"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     rec_dir = output_path.parent / "rec"
