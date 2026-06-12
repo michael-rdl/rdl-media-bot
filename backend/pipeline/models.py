@@ -61,6 +61,22 @@ class Event(models.Model):
     event_type = models.CharField(max_length=50, blank=True)
     ig_highlight_pk = models.CharField(max_length=255, blank=True)
     ig_highlight_url = models.URLField(blank=True)
+
+    audio_file = models.FileField(upload_to="events/audio/", blank=True)
+
+    ads_enabled = models.BooleanField(default=False)
+    ad_video = models.FileField(upload_to="events/ads/", blank=True)
+    ad_frequency = models.PositiveIntegerField(
+        default=10,
+        help_text="Publish an ad every N posts",
+    )
+    ad_instagram_handle = models.CharField(
+        max_length=200,
+        default="truedriftofficial",
+        help_text="IG handle to tag in ad posts",
+    )
+    posts_since_last_ad = models.PositiveIntegerField(default=0)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

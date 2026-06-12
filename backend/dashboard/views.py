@@ -238,6 +238,48 @@ def event_detail(request, event_id):
 
 
 @require_POST
+def event_update_audio(request, event_id):
+    event = get_object_or_404(Event, id=event_id)
+
+    if request.POST.get("remove"):
+        if event.audio_file:
+            event.audio_file.delete(save=False)
+            event.audio_file = ""
+            event.save(update_fields=["audio_file"])
+    elif request.FILES.get("audio_file"):
+        if event.audio_file:
+            event.audio_file.delete(save=False)
+        event.audio_file = request.FILES["audio_file"]
+        event.save(update_fields=["audio_file"])
+
+    return redirect("dashboard:event-detail", event_id=event.id)
+
+
+@require_POST
+def event_update_ads(request, event_id):
+    event = get_object_or_404(Event, id=event_id)
+
+    event.ads_enabled = request.POST.get("ads_enabled") == "on"
+    event.ad_frequency = max(1, int(request.POST.get("ad_frequency", 10)))
+    event.ad_instagram_handle = request.POST.get("ad_instagram_handle", "truedriftofficial").strip().lstrip("@")
+
+    if request.POST.get("remove_video"):
+        if event.ad_video:
+            event.ad_video.delete(save=False)
+            event.ad_video = ""
+    elif request.FILES.get("ad_video"):
+        if event.ad_video:
+            event.ad_video.delete(save=False)
+        event.ad_video = request.FILES["ad_video"]
+
+    event.save(update_fields=[
+        "ads_enabled", "ad_frequency", "ad_instagram_handle", "ad_video",
+    ])
+
+    return redirect("dashboard:event-detail", event_id=event.id)
+
+
+@require_POST
 def event_create_highlight(request, event_id):
     event = get_object_or_404(Event, id=event_id)
 

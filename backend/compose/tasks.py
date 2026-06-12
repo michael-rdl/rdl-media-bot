@@ -39,7 +39,13 @@ def compose_story(job_id: int):
 
     media_root = Path(settings.MEDIA_ROOT)
     viz_path = media_root / viz_piece.file.name
-    audio_path = media_root / audio_piece.file.name if audio_piece and audio_piece.file else None
+
+    audio_path = None
+    if audio_piece and audio_piece.file:
+        audio_path = media_root / audio_piece.file.name
+    elif job.session and job.session.event.audio_file:
+        audio_path = Path(job.session.event.audio_file.path)
+        logger.info("Job #%d: using event-level audio: %s", job_id, audio_path)
     output_path = media_root / "jobs" / str(job_id) / "story_final.mp4"
 
     stats = _extract_stats(job.run_metadata)

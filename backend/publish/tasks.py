@@ -2,9 +2,10 @@ import logging
 from pathlib import Path
 
 from django.conf import settings
+from django.db import models
 from django.utils import timezone
 
-from pipeline.models import ContentPiece, Job, PublishResult
+from pipeline.models import ContentPiece, Event, Job, PublishResult
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,8 @@ def publish_content(job_id: int):
         _publish_youtube(job, story_piece, video_path, caption)
     else:
         logger.warning("Job #%d: no YouTube credentials configured, skipping", job_id)
+
+    _maybe_publish_ad(job, story_piece)
 
 
 def _publish_instagram_graph(job, story_piece, video_path, caption):
@@ -228,6 +231,82 @@ def _extract_instagram_handles(run_metadata: dict) -> list[str]:
         if handle:
             handles.append(handle)
     return handles
+
+
+def _maybe_publish_ad(job, story_piece):
+    """
+    Increment the event's ad counter. When it reaches ad_frequency,
+    publish the ad video as a Story and reset the counter.
+    """
+    session = getattr(job, "session", None)
+    if not session:
+        return
+
+    event = session.event
+    if not event.ads_enabled or not event.ad_video:
+        return
+
+    Event.objects.filter(id=event.id).update(
+        posts_since_last_ad=models.F("posts_since_last_ad") + 1,
+    )
+    event.refresh_from_db(fields=["posts_since_last_ad"])
+
+    if event.posts_since_last_ad < event.ad_frequency:
+        logger.info(
+            "Job #%d: ad counter %d/%d",
+            job.id, event.posts_since_last_ad, event.ad_frequency,
+        )
+        return
+
+    media_root = Path(settings.MEDIA_ROOT)
+    ad_path = Path(event.ad_video.path)
+    if not ad_path.exists():
+        logger.error("Job #%d: ad video file missing: %s", job.id, ad_path)
+        return
+
+    handle = event.ad_instagram_handle
+    caption = f"@{handle}" if handle else ""
+    logger.info("Job #%d: publishing ad video (every %d posts), tagging @%s", job.id, event.ad_frequency, handle)
+
+    pr = PublishResult.objects.create(
+        content_piece=story_piece,
+        platform=PublishResult.Platform.INSTAGRAM_STORY,
+        status=PublishResult.Status.UPLOADING,
+        caption=f"[AD] {caption}",
+    )
+
+    try:
+        if settings.INSTAGRAM_USERNAME:
+            from .instagram import InstagrapiPublisher
+            publisher = InstagrapiPublisher()
+            result = publisher.publish(
+                ad_path, caption,
+                media_type="STORIES",
+                mentions=[handle] if handle else [],
+            )
+        elif settings.INSTAGRAM_ACCESS_TOKEN:
+            from .instagram import InstagramGraphPublisher
+            publisher = InstagramGraphPublisher()
+            result = publisher.publish(ad_path, caption, media_type="STORIES")
+        else:
+            logger.warning("Job #%d: no IG credentials for ad publish", job.id)
+            pr.delete()
+            return
+
+        pr.status = PublishResult.Status.PUBLISHED
+        pr.platform_post_id = result["post_id"]
+        pr.platform_url = result.get("url", "")
+        pr.published_at = timezone.now()
+        pr.save()
+
+        Event.objects.filter(id=event.id).update(posts_since_last_ad=0)
+        logger.info("Job #%d: ad published, counter reset", job.id)
+
+    except Exception as exc:
+        pr.status = PublishResult.Status.FAILED
+        pr.error_message = str(exc)[:2000]
+        pr.save()
+        logger.exception("Job #%d: ad publish failed", job.id)
 
 
 def _extract_stats(run_metadata: dict) -> dict:
