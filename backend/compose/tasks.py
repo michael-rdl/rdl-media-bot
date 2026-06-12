@@ -99,7 +99,7 @@ def compose_story(job_id: int):
         audio_path=audio_path,
         width=template.output_width,
         height=template.output_height,
-        max_duration=float(template.max_duration_seconds),
+        max_duration=0,
         sfx_paths=sfx_paths,
         scene_events=scene_events,
     )

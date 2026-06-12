@@ -25,14 +25,12 @@ _POLL_JS = """() => {
     };
     const result = {};
 
-    // Entry: visible divs with driver/event text (they sit directly in root)
-    const root = document.getElementById('animationContainer');
-    if (root) {
-        for (const d of root.parentElement.querySelectorAll(':scope > div')) {
-            if (d.id) continue;
-            const txt = (d.innerText || '').trim();
-            if (txt && txt.length > 2 && txt.length < 120 && vis(d))
-                result.entry = true;
+    // Entry: look for visible text containing "Run #" pattern (driver/event intro card)
+    for (const d of document.querySelectorAll('div')) {
+        const txt = (d.innerText || '').trim();
+        if (txt && txt.includes('Run #') && vis(d)) {
+            result.entry = true;
+            break;
         }
     }
 
