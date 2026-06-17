@@ -3,28 +3,58 @@ Reusable sync logic for pulling events, sessions, and runs from rdl-base.
 Called by the sync_events management command and the dashboard sync view.
 """
 import logging
-import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests as _requests
-from django.conf import settings
 from django.utils.dateparse import parse_datetime
 
-from .models import Event, Run, Session
-from .rdl_client import api_get
+from .models import Event, Organisation, Run, Session
+from .rdl_client import RdlConfig, api_get, get_config, reset_session
 
 logger = logging.getLogger(__name__)
 
 RUN_DETAIL_WORKERS = 5
 
 
-def sync_events_from_rdl() -> dict:
+def sync_events_from_rdl(organisation=None) -> dict:
     """
     Fetch all events, sessions, and runs from the rdl-base API and upsert
-    them into local tables.
+    them into local tables. Syncs one organisation or all if none specified.
     """
-    global _auth_cookies
-    _auth_cookies = None
+    if organisation is not None:
+        return _sync_organisation(organisation)
+
+    totals = {
+        "events_created": 0,
+        "events_updated": 0,
+        "sessions_created": 0,
+        "sessions_updated": 0,
+        "runs_synced": 0,
+        "errors": [],
+    }
+    orgs = Organisation.objects.all()
+    if not orgs.exists():
+        totals["errors"].append("No organisations configured")
+        return totals
+
+    for org in orgs:
+        result = _sync_organisation(org)
+        for key in ("events_created", "events_updated", "sessions_created", "sessions_updated", "runs_synced"):
+            totals[key] += result[key]
+        totals["errors"].extend(result["errors"])
+
+    logger.info(
+        "Sync complete: events %d/%d, sessions %d/%d, runs %d",
+        totals["events_created"], totals["events_updated"],
+        totals["sessions_created"], totals["sessions_updated"],
+        totals["runs_synced"],
+    )
+    return totals
+
+
+def _sync_organisation(org: Organisation) -> dict:
+    reset_session(org)
+    config = get_config(org)
 
     counts = {
         "events_created": 0,
@@ -35,9 +65,9 @@ def sync_events_from_rdl() -> dict:
         "errors": [],
     }
 
-    events_data = _fetch_all_events()
+    events_data = _fetch_all_events(org)
     if not events_data:
-        counts["errors"].append("No events returned from rdl-base API")
+        counts["errors"].append(f"No events returned from {org.name} ({config.api_url})")
         return counts
 
     for raw_event in events_data:
@@ -49,6 +79,7 @@ def sync_events_from_rdl() -> dict:
         event_type = raw_event.get("event_type", "")
 
         event_obj, event_created = Event.objects.update_or_create(
+            organisation=org,
             rdl_event_id=rdl_event_id,
             defaults={"name": event_name, "event_type": event_type},
         )
@@ -57,9 +88,9 @@ def sync_events_from_rdl() -> dict:
         else:
             counts["events_updated"] += 1
 
-        detail = _fetch_event_detail(rdl_event_id)
+        detail = _fetch_event_detail(org, rdl_event_id)
         if not detail:
-            counts["errors"].append(f"Could not fetch detail for event {rdl_event_id}")
+            counts["errors"].append(f"Could not fetch detail for event {rdl_event_id} ({org.code})")
             continue
 
         session_name_map = {}
@@ -69,11 +100,9 @@ def sync_events_from_rdl() -> dict:
                 continue
 
             session_obj, session_created = Session.objects.update_or_create(
+                event=event_obj,
                 rdl_session_id=rdl_session_id,
-                defaults={
-                    "event": event_obj,
-                    "name": raw_session.get("name", ""),
-                },
+                defaults={"name": raw_session.get("name", "")},
             )
             session_name_map[raw_session.get("name", "")] = session_obj
             if session_created:
@@ -81,46 +110,35 @@ def sync_events_from_rdl() -> dict:
             else:
                 counts["sessions_updated"] += 1
 
-        runs_synced = _sync_runs_for_event(event_obj, session_name_map)
+        runs_synced = _sync_runs_for_event(org, event_obj, session_name_map, config)
         counts["runs_synced"] += runs_synced
 
-    logger.info(
-        "Sync complete: events %d/%d, sessions %d/%d, runs %d",
-        counts["events_created"], counts["events_updated"],
-        counts["sessions_created"], counts["sessions_updated"],
-        counts["runs_synced"],
-    )
     return counts
 
 
-def _sync_runs_for_event(event: Event, session_name_map: dict) -> int:
+def _sync_runs_for_event(org, event: Event, session_name_map: dict, config: RdlConfig) -> int:
     """Fetch all runs for an event, get details in parallel for session mapping."""
-    all_runs = _fetch_all_runs()
+    all_runs = _fetch_all_runs(org)
     event_runs = [r for r in all_runs if r.get("event_id") == event.rdl_event_id]
 
     if not event_runs:
         return 0
 
-    unmatched_ids = set(
-        Run.objects.filter(event=event, session__isnull=True)
-        .values_list("rdl_run_id", flat=True)
-    )
     matched_ids = set(
         Run.objects.filter(event=event, session__isnull=False)
         .values_list("rdl_run_id", flat=True)
     )
-    # Fetch details for runs that are new or still unmatched to a session
     new_runs = [r for r in event_runs if r["id"] not in matched_ids]
 
     if not new_runs:
         return 0
 
-    logger.info("Fetching details for %d runs (event %d)...", len(new_runs), event.rdl_event_id)
+    logger.info("Fetching details for %d runs (event %d, org %s)...", len(new_runs), event.rdl_event_id, org.code)
 
     run_details = {}
     with ThreadPoolExecutor(max_workers=RUN_DETAIL_WORKERS) as pool:
         future_map = {
-            pool.submit(_fetch_run_detail, r["id"]): r
+            pool.submit(_fetch_run_detail, config, r["id"]): r
             for r in new_runs
         }
         for future in as_completed(future_map):
@@ -142,9 +160,9 @@ def _sync_runs_for_event(event: Event, session_name_map: dict) -> int:
         rdl_created = parse_datetime(created_str) if created_str else None
 
         Run.objects.update_or_create(
+            event=event,
             rdl_run_id=raw["id"],
             defaults={
-                "event": event,
                 "session": session_obj,
                 "description": raw.get("description", "") or detail.get("description", ""),
                 "run_type": raw.get("run_type", "") or detail.get("run_type", ""),
@@ -154,19 +172,19 @@ def _sync_runs_for_event(event: Event, session_name_map: dict) -> int:
         )
         synced += 1
 
-    logger.info("Synced %d runs for event %d", synced, event.rdl_event_id)
+    logger.info("Synced %d runs for event %d (%s)", synced, event.rdl_event_id, org.code)
     return synced
 
 
-def _fetch_all_events() -> list[dict]:
+def _fetch_all_events(org) -> list[dict]:
     all_events = []
     url = "/event/"
 
     while url:
         try:
-            resp = api_get(url)
+            resp = api_get(url, organisation=org)
         except Exception as exc:
-            logger.error("Failed to fetch events: %s", exc)
+            logger.error("Failed to fetch events for %s: %s", org.code, exc)
             break
 
         if resp.status_code != 200:
@@ -188,15 +206,15 @@ def _fetch_all_events() -> list[dict]:
     return all_events
 
 
-def _fetch_all_runs() -> list[dict]:
+def _fetch_all_runs(org) -> list[dict]:
     all_runs = []
     url = "/run/"
 
     while url:
         try:
-            resp = api_get(url)
+            resp = api_get(url, organisation=org)
         except Exception as exc:
-            logger.error("Failed to fetch runs: %s", exc)
+            logger.error("Failed to fetch runs for %s: %s", org.code, exc)
             break
 
         if resp.status_code != 200:
@@ -218,9 +236,9 @@ def _fetch_all_runs() -> list[dict]:
     return all_runs
 
 
-def _fetch_event_detail(event_id: int) -> dict | None:
+def _fetch_event_detail(org, event_id: int) -> dict | None:
     try:
-        resp = api_get(f"/event/{event_id}/")
+        resp = api_get(f"/event/{event_id}/", organisation=org)
         if resp.status_code == 200:
             return resp.json()
         logger.error("Event %d detail: got %d", event_id, resp.status_code)
@@ -229,52 +247,24 @@ def _fetch_event_detail(event_id: int) -> dict | None:
     return None
 
 
-_auth_cookies = None
+def _fetch_run_detail(config: RdlConfig, run_id: int) -> dict | None:
+    """Fetch a single run's detail using org-specific auth."""
+    try:
+        api_url = config.api_url.rstrip("/")
+        headers = {"Content-Type": "application/json"}
+        cookies = {}
 
-
-def _get_auth_cookies() -> dict:
-    """Authenticate once and cache cookies for all threads."""
-    global _auth_cookies
-    if _auth_cookies is not None:
-        return _auth_cookies
-
-    _auth_cookies = {}
-    api_url = settings.RDL_BASE_API_URL.rstrip("/")
-
-    if settings.RDL_INTERNAL_API_KEY:
-        _auth_cookies = {"_header": settings.RDL_INTERNAL_API_KEY}
-        return _auth_cookies
-
-    email = getattr(settings, "RDL_API_USERNAME", "")
-    password = getattr(settings, "RDL_API_PASSWORD", "")
-    if email and password:
-        try:
+        if config.internal_api_key:
+            headers["X-Internal-Key"] = config.internal_api_key
+        elif config.api_username and config.api_password:
             resp = _requests.post(
                 f"{api_url}/auth/login/",
-                json={"email": email, "password": password},
+                json={"email": config.api_username, "password": config.api_password},
                 headers={"Content-Type": "application/json", "Referer": api_url},
                 timeout=15,
             )
             if resp.status_code == 200:
-                _auth_cookies = dict(resp.cookies)
-                logger.info("Authenticated for run detail fetching")
-            else:
-                logger.warning("Auth for run details failed: %d", resp.status_code)
-        except Exception as exc:
-            logger.warning("Auth error: %s", exc)
-
-    return _auth_cookies
-
-
-def _fetch_run_detail(run_id: int) -> dict | None:
-    """Fetch a single run's detail using shared auth cookies."""
-    try:
-        api_url = settings.RDL_BASE_API_URL.rstrip("/")
-        cookies = _get_auth_cookies()
-        headers = {"Content-Type": "application/json"}
-        if "_header" in cookies:
-            headers["X-Internal-Key"] = cookies["_header"]
-            cookies = {}
+                cookies = dict(resp.cookies)
 
         resp = _requests.get(
             f"{api_url}/run/{run_id}/",

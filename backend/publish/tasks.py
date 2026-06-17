@@ -6,6 +6,9 @@ from django.db import models
 from django.utils import timezone
 
 from pipeline.models import ContentPiece, Event, Job, PublishResult
+from pipeline.rdl_client import get_config
+from pipeline.utils import resolve_organisation_for_job
+from publish.instagram_credentials import get_instagram_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -29,17 +32,22 @@ def publish_content(job_id: int):
 
     caption = _build_caption(job)
     ig_handles = _extract_instagram_handles(job.run_metadata)
+    organisation = resolve_organisation_for_job(job)
+    org_handle = organisation.instagram_handle.lstrip("@") if organisation and organisation.instagram_handle else ""
+    if org_handle and org_handle not in ig_handles:
+        ig_handles = [org_handle, *ig_handles]
 
     ig_post_id = None
-    if settings.INSTAGRAM_ACCESS_TOKEN:
-        ig_post_id = _publish_instagram_graph(job, story_piece, video_path, caption)
-    elif settings.INSTAGRAM_USERNAME:
-        ig_post_id = _publish_instagram_private(job, story_piece, video_path, caption, ig_handles)
+    ig_creds = get_instagram_credentials(organisation)
+    if ig_creds and ig_creds.method == "graph":
+        ig_post_id = _publish_instagram_graph(job, story_piece, video_path, caption, ig_creds)
+    elif ig_creds and ig_creds.method == "instagrapi":
+        ig_post_id = _publish_instagram_private(job, story_piece, video_path, caption, ig_handles, organisation, ig_creds)
     else:
         logger.warning("Job #%d: no Instagram credentials configured, skipping", job_id)
 
     if ig_post_id and not job.publish_as_reel:
-        _add_to_event_highlight(job, ig_post_id)
+        _add_to_event_highlight(job, ig_post_id, ig_creds)
 
     if settings.YOUTUBE_OAUTH_TOKEN_FILE:
         _publish_youtube(job, story_piece, video_path, caption)
@@ -49,7 +57,7 @@ def publish_content(job_id: int):
     _maybe_publish_ad(job, story_piece)
 
 
-def _publish_instagram_graph(job, story_piece, video_path, caption):
+def _publish_instagram_graph(job, story_piece, video_path, caption, credentials):
     from .instagram import InstagramGraphPublisher
 
     media_type = "REELS" if job.publish_as_reel else "STORIES"
@@ -67,7 +75,7 @@ def _publish_instagram_graph(job, story_piece, video_path, caption):
     )
 
     try:
-        publisher = InstagramGraphPublisher()
+        publisher = InstagramGraphPublisher(credentials)
         result = publisher.publish(
             video_path, caption, media_type=media_type,
         )
@@ -86,7 +94,7 @@ def _publish_instagram_graph(job, story_piece, video_path, caption):
         raise
 
 
-def _publish_instagram_private(job, story_piece, video_path, caption, ig_handles=None):
+def _publish_instagram_private(job, story_piece, video_path, caption, ig_handles=None, organisation=None, credentials=None):
     from .instagram import InstagrapiPublisher
 
     media_type = "REELS" if job.publish_as_reel else "STORIES"
@@ -103,10 +111,11 @@ def _publish_instagram_private(job, story_piece, video_path, caption, ig_handles
         caption=caption,
     )
 
-    replay_url = f"{settings.RDL_BASE_URL.rstrip('/')}/review/{job.rdl_run_id}"
+    config = get_config(organisation)
+    replay_url = f"{config.base_url}/review/{job.rdl_run_id}"
 
     try:
-        publisher = InstagrapiPublisher()
+        publisher = InstagrapiPublisher(credentials)
         result = publisher.publish(
             video_path, caption,
             media_type=media_type,
@@ -161,7 +170,7 @@ def _publish_youtube(job, story_piece, video_path, caption):
         raise
 
 
-def _add_to_event_highlight(job, story_post_id: str):
+def _add_to_event_highlight(job, story_post_id: str, credentials=None):
     """
     If the job's session's event has a highlight configured,
     add the published story to it. Creates the highlight on first use
@@ -175,13 +184,13 @@ def _add_to_event_highlight(job, story_post_id: str):
     if not event.ig_highlight_pk:
         return
 
-    if not settings.INSTAGRAM_USERNAME:
-        logger.warning("Job #%d: no instagrapi credentials for highlight", job.id)
+    if not credentials or credentials.method != "instagrapi":
+        logger.warning("Job #%d: highlights require instagrapi credentials", job.id)
         return
 
     try:
         from .instagram import InstagramHighlightManager
-        mgr = InstagramHighlightManager()
+        mgr = InstagramHighlightManager(credentials)
 
         if event.ig_highlight_pk == "pending":
             result = mgr.create_highlight(
@@ -202,6 +211,7 @@ def _add_to_event_highlight(job, story_post_id: str):
 
 def _build_caption(job) -> str:
     parts = []
+    organisation = resolve_organisation_for_job(job)
 
     if job.driver_name:
         parts.append(job.driver_name)
@@ -215,8 +225,13 @@ def _build_caption(job) -> str:
     if stats.get("max_drift_angle"):
         parts.append(f"Max Angle: {stats['max_drift_angle']:.1f}°")
 
+    hashtags = ["#drift", "#motorsport", "#racedatalabs", "#rdl"]
+    if organisation and organisation.instagram_handle:
+        tag = organisation.instagram_handle.lstrip("@")
+        hashtags.append(f"#{tag}")
+
     parts.append("")
-    parts.append("#drift #motorsport #racedatalabs #rdl")
+    parts.append(" ".join(hashtags))
 
     return " | ".join(p for p in parts if p) if parts else "Race Data Labs"
 
@@ -276,17 +291,19 @@ def _maybe_publish_ad(job, story_piece):
     )
 
     try:
-        if settings.INSTAGRAM_USERNAME:
+        organisation = resolve_organisation_for_job(job)
+        ig_creds = get_instagram_credentials(organisation)
+        if ig_creds and ig_creds.method == "instagrapi":
             from .instagram import InstagrapiPublisher
-            publisher = InstagrapiPublisher()
+            publisher = InstagrapiPublisher(ig_creds)
             result = publisher.publish(
                 ad_path, caption,
                 media_type="STORIES",
                 mentions=[handle] if handle else [],
             )
-        elif settings.INSTAGRAM_ACCESS_TOKEN:
+        elif ig_creds and ig_creds.method == "graph":
             from .instagram import InstagramGraphPublisher
-            publisher = InstagramGraphPublisher()
+            publisher = InstagramGraphPublisher(ig_creds)
             result = publisher.publish(ad_path, caption, media_type="STORIES")
         else:
             logger.warning("Job #%d: no IG credentials for ad publish", job.id)

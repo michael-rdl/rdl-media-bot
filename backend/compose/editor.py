@@ -23,6 +23,10 @@ def compose_story_video(
     max_duration: float = 60.0,
     sfx_paths: Optional[dict] = None,
     scene_events: Optional[list] = None,
+    logo_path: Optional[Path] = None,
+    logo_position_x: float = 0.05,
+    logo_position_y: float = 0.03,
+    logo_scale: float = 0.15,
     **kwargs,
 ) -> Path:
     """
@@ -45,10 +49,12 @@ def compose_story_video(
             viz_path, output_path, width, height, max_duration,
             fade_start, duration, audio_path if has_bg else None,
             sfx_hits,
+            logo_path, logo_position_x, logo_position_y, logo_scale,
         )
 
     return _compose_video_only(
         viz_path, output_path, width, height, max_duration, fade_start,
+        logo_path, logo_position_x, logo_position_y, logo_scale,
     )
 
 
@@ -68,33 +74,81 @@ def _build_sfx_hits(sfx_paths: dict, scene_events: list) -> list:
     return hits
 
 
-def _compose_video_only(viz_path, output_path, width, height, max_duration, fade_start):
-    """Simple compose: video scale + fade, no audio."""
-    vf = (
-        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+def _video_scale_filter(width, height, fade_start, label="vscaled"):
+    return (
+        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
         f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,"
-        f"fade=t=out:st={fade_start:.2f}:d=1:color=black"
+        f"fade=t=out:st={fade_start:.2f}:d=1:color=black[{label}]"
     )
-    cmd = ["ffmpeg", "-y", "-i", str(viz_path)]
-    if max_duration > 0:
-        cmd.extend(["-t", str(max_duration)])
-    cmd.extend(["-vf", vf, "-an"])
+
+
+def _logo_overlay_filter(width, height, pos_x, pos_y, scale, input_label="vscaled", output_label="vout"):
+    logo_w = max(1, int(width * scale))
+    x = int(width * pos_x)
+    y = int(height * pos_y)
+    return (
+        f"[1:v]scale={logo_w}:-1[logo];"
+        f"[{input_label}][logo]overlay={x}:{y}[{output_label}]"
+    )
+
+
+def _compose_video_only(
+    viz_path, output_path, width, height, max_duration, fade_start,
+    logo_path=None, logo_position_x=0.05, logo_position_y=0.03, logo_scale=0.15,
+):
+    """Simple compose: video scale + fade, optional logo, no audio."""
+    has_logo = logo_path and logo_path.exists()
+
+    if has_logo:
+        vf = _video_scale_filter(width, height, fade_start)
+        vf += ";" + _logo_overlay_filter(width, height, logo_position_x, logo_position_y, logo_scale)
+        cmd = ["ffmpeg", "-y", "-i", str(viz_path), "-i", str(logo_path)]
+        if max_duration > 0:
+            cmd.extend(["-t", str(max_duration)])
+        cmd.extend(["-filter_complex", vf, "-map", "[vout]", "-an"])
+    else:
+        vf = (
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,"
+            f"fade=t=out:st={fade_start:.2f}:d=1:color=black"
+        )
+        cmd = ["ffmpeg", "-y", "-i", str(viz_path)]
+        if max_duration > 0:
+            cmd.extend(["-t", str(max_duration)])
+        cmd.extend(["-vf", vf, "-an"])
+
     cmd.extend(_encoding_args(output_path))
     return _run_ffmpeg(cmd, output_path, "video-only")
 
 
-def _compose_bg_audio_only(viz_path, output_path, width, height, max_duration, fade_start, bg_audio_path):
+def _compose_bg_audio_only(
+    viz_path, output_path, width, height, max_duration, fade_start, bg_audio_path,
+    logo_path=None, logo_position_x=0.05, logo_position_y=0.03, logo_scale=0.15,
+):
     """Compose with background audio only (no SFX)."""
-    vf = (
-        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,"
-        f"fade=t=out:st={fade_start:.2f}:d=1:color=black"
-    )
-    cmd = ["ffmpeg", "-y", "-i", str(viz_path), "-i", str(bg_audio_path)]
+    has_logo = logo_path and logo_path.exists()
+    audio_input_idx = 2 if has_logo else 1
+
+    cmd = ["ffmpeg", "-y", "-i", str(viz_path)]
+    if has_logo:
+        cmd.extend(["-i", str(logo_path)])
+    cmd.extend(["-i", str(bg_audio_path)])
+
     if max_duration > 0:
         cmd.extend(["-t", str(max_duration)])
-    cmd.extend(["-vf", vf])
-    cmd.extend(["-map", "0:v", "-map", "1:a"])
+
+    if has_logo:
+        vf = _video_scale_filter(width, height, fade_start)
+        vf += ";" + _logo_overlay_filter(width, height, logo_position_x, logo_position_y, logo_scale)
+        cmd.extend(["-filter_complex", vf, "-map", "[vout]", "-map", f"{audio_input_idx}:a"])
+    else:
+        vf = (
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,"
+            f"fade=t=out:st={fade_start:.2f}:d=1:color=black"
+        )
+        cmd.extend(["-vf", vf, "-map", "0:v", "-map", "1:a"])
+
     cmd.extend(["-c:a", "aac", "-b:a", "192k", "-shortest"])
     cmd.extend(_encoding_args(output_path))
     return _run_ffmpeg(cmd, output_path, "bg audio only")
@@ -103,6 +157,7 @@ def _compose_bg_audio_only(viz_path, output_path, width, height, max_duration, f
 def _compose_with_audio(
     viz_path, output_path, width, height, max_duration,
     fade_start, duration, bg_audio_path, sfx_hits,
+    logo_path=None, logo_position_x=0.05, logo_position_y=0.03, logo_scale=0.15,
 ):
     """
     Compose with filter_complex: video + SFX one-shots + optional
@@ -117,17 +172,24 @@ def _compose_with_audio(
         return _compose_bg_audio_only(
             viz_path, output_path, width, height, max_duration,
             fade_start, bg_audio_path,
+            logo_path, logo_position_x, logo_position_y, logo_scale,
         )
+
+    has_logo = logo_path and logo_path.exists()
 
     # Deduplicate SFX files to minimise inputs; map each hit to its input idx
     unique_sfx = {}  # path -> input_idx
     next_idx = 1
+    if has_logo:
+        next_idx = 2
     for path, _delay in sfx_hits:
         if path not in unique_sfx:
             unique_sfx[path] = next_idx
             next_idx += 1
 
     cmd = ["ffmpeg", "-y", "-i", str(viz_path)]
+    if has_logo:
+        cmd.extend(["-i", str(logo_path)])
     for path in unique_sfx:
         cmd.extend(["-i", str(path)])
 
@@ -140,11 +202,15 @@ def _compose_with_audio(
         cmd.extend(["-t", str(max_duration)])
 
     # Build filter_complex
-    vf = (
-        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
-        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,"
-        f"fade=t=out:st={fade_start:.2f}:d=1:color=black[vout]"
-    )
+    if has_logo:
+        vf = _video_scale_filter(width, height, fade_start, label="vscaled")
+        vf += ";" + _logo_overlay_filter(
+            width, height, logo_position_x, logo_position_y, logo_scale,
+            input_label="vscaled", output_label="vout",
+        )
+    else:
+        vf = _video_scale_filter(width, height, fade_start, label="vout")
+    video_out = "[vout]"
     filters = [vf]
 
     # Delay each SFX hit
@@ -175,7 +241,7 @@ def _compose_with_audio(
     filter_complex = ";\n".join(filters)
 
     cmd.extend(["-filter_complex", filter_complex])
-    cmd.extend(["-map", "[vout]", "-map", audio_map])
+    cmd.extend(["-map", video_out, "-map", audio_map])
     cmd.extend(["-c:a", "aac", "-b:a", "192k"])
     cmd.extend(_encoding_args(output_path))
     return _run_ffmpeg(cmd, output_path, f"{len(sfx_hits)} SFX hits")

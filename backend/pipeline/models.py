@@ -44,7 +44,72 @@ class Sponsor(models.Model):
 
 class Organisation(models.Model):
     name = models.CharField(max_length=200)
-    photo = models.ImageField(upload_to="organisations/", blank=True)
+    code = models.CharField(
+        max_length=20,
+        unique=True,
+        help_text="Short code, e.g. FD for Formula Drift",
+    )
+
+    rdl_base_url = models.URLField(
+        default="https://fd.racedatalabs.com",
+        help_text="Web UI base URL for replay capture and review links",
+    )
+    rdl_base_api_url = models.URLField(
+        default="https://fd.racedatalabs.com/api/v1",
+        help_text="rdl-base REST API base URL",
+    )
+    rdl_internal_api_key = models.CharField(max_length=255, blank=True)
+    rdl_api_username = models.EmailField(blank=True)
+    rdl_api_password = models.CharField(max_length=255, blank=True)
+
+    instagram_handle = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Organisation IG handle to tag in published media",
+    )
+
+    class InstagramAuthMethod(models.TextChoices):
+        GRAPH = "graph", "Instagram Graph API"
+        INSTAGRAPI = "instagrapi", "Instagram Private API (instagrapi)"
+
+    instagram_auth_method = models.CharField(
+        max_length=20,
+        choices=InstagramAuthMethod.choices,
+        blank=True,
+        help_text="How this organisation publishes to Instagram",
+    )
+    instagram_user_id = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Instagram Business Account ID (Graph API)",
+    )
+    instagram_access_token = models.CharField(
+        max_length=512,
+        blank=True,
+        help_text="Page access token with instagram_content_publish (Graph API)",
+    )
+    instagram_username = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Instagram login username (instagrapi)",
+    )
+    instagram_password = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Instagram login password (instagrapi)",
+    )
+    instagram_account_name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Cached @handle from last successful connection test",
+    )
+    instagram_connected_at = models.DateTimeField(null=True, blank=True)
+
+    logo = models.ImageField(upload_to="organisations/logos/", blank=True)
+    logo_position_x = models.FloatField(default=0.05, help_text="0-1 fraction from left")
+    logo_position_y = models.FloatField(default=0.03, help_text="0-1 fraction from top")
+    logo_scale = models.FloatField(default=0.15, help_text="Logo width as fraction of video width")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -56,7 +121,12 @@ class Organisation(models.Model):
 
 
 class Event(models.Model):
-    rdl_event_id = models.PositiveIntegerField(unique=True)
+    organisation = models.ForeignKey(
+        Organisation,
+        on_delete=models.CASCADE,
+        related_name="events",
+    )
+    rdl_event_id = models.PositiveIntegerField()
     name = models.CharField(max_length=200)
     event_type = models.CharField(max_length=50, blank=True)
     ig_highlight_pk = models.CharField(max_length=255, blank=True)
@@ -87,6 +157,12 @@ class Event(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organisation", "rdl_event_id"],
+                name="unique_event_per_organisation",
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -94,7 +170,7 @@ class Event(models.Model):
 
 class Session(models.Model):
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="sessions")
-    rdl_session_id = models.PositiveIntegerField(unique=True)
+    rdl_session_id = models.PositiveIntegerField()
     name = models.CharField(max_length=200)
     is_live = models.BooleanField(default=False)
     last_run_seen_at = models.DateTimeField(null=True, blank=True)
@@ -104,6 +180,12 @@ class Session(models.Model):
 
     class Meta:
         ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "rdl_session_id"],
+                name="unique_session_per_event",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.event.name} - {self.name}"
@@ -111,7 +193,7 @@ class Session(models.Model):
 
 class Run(models.Model):
     """Cached run data from rdl-base, linked to a session."""
-    rdl_run_id = models.PositiveIntegerField(unique=True)
+    rdl_run_id = models.PositiveIntegerField()
     session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name="runs", null=True, blank=True)
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="runs")
     description = models.CharField(max_length=500, blank=True)
@@ -122,6 +204,12 @@ class Run(models.Model):
 
     class Meta:
         ordering = ["-rdl_run_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "rdl_run_id"],
+                name="unique_run_per_event",
+            ),
+        ]
 
     def __str__(self):
         return f"Run {self.rdl_run_id}: {self.description}"

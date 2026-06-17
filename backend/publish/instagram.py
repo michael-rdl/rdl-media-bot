@@ -7,6 +7,7 @@ import requests
 from django.conf import settings
 
 from .base import ContentPublisher
+from .instagram_credentials import InstagramCredentials
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +22,13 @@ class InstagramGraphPublisher(ContentPublisher):
     Requires a Business account and approved Meta App.
     """
 
-    def __init__(self):
-        self.user_id = settings.INSTAGRAM_USER_ID
-        self.access_token = settings.INSTAGRAM_ACCESS_TOKEN
+    def __init__(self, credentials: InstagramCredentials | None = None):
+        if credentials and credentials.method == "graph":
+            self.user_id = credentials.user_id
+            self.access_token = credentials.access_token
+        else:
+            self.user_id = settings.INSTAGRAM_USER_ID
+            self.access_token = settings.INSTAGRAM_ACCESS_TOKEN
 
         if not self.user_id or not self.access_token:
             raise RuntimeError("Instagram Graph API credentials not configured")
@@ -127,9 +132,13 @@ class InstagrapiPublisher(ContentPublisher):
     More flexible for Stories -- supports mentions, links, hashtags.
     """
 
-    def __init__(self):
-        self.username = settings.INSTAGRAM_USERNAME
-        self.password = settings.INSTAGRAM_PASSWORD
+    def __init__(self, credentials: InstagramCredentials | None = None):
+        if credentials and credentials.method == "instagrapi":
+            self.username = credentials.username
+            self.password = credentials.password
+        else:
+            self.username = settings.INSTAGRAM_USERNAME
+            self.password = settings.INSTAGRAM_PASSWORD
 
         if not self.username or not self.password:
             raise RuntimeError("Instagram credentials not configured for instagrapi")
@@ -199,12 +208,17 @@ class InstagramHighlightManager:
     Not wired into the publish pipeline -- call directly when needed.
     """
 
-    def __init__(self):
-        self.username = settings.INSTAGRAM_USERNAME
-        self.password = settings.INSTAGRAM_PASSWORD
+    def __init__(self, credentials: InstagramCredentials | None = None):
+        if credentials and credentials.method == "instagrapi":
+            self.username = credentials.username
+            self.password = credentials.password
+        else:
+            self.username = settings.INSTAGRAM_USERNAME
+            self.password = settings.INSTAGRAM_PASSWORD
 
         if not self.username or not self.password:
             raise RuntimeError("Instagram credentials not configured for highlights")
+        self._credentials = credentials
 
     def _get_client(self):
         from instagrapi import Client

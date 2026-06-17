@@ -3,7 +3,8 @@ from pathlib import Path
 
 from django.conf import settings
 
-from pipeline.models import ContentPiece, ContentTemplate, Event, Job, Run
+from pipeline.models import ContentPiece, ContentTemplate, Event, Job
+from pipeline.utils import resolve_event_for_job, resolve_organisation_for_job
 
 from .editor import compose_story_video
 
@@ -34,13 +35,7 @@ def _resolve_sfx_paths(event):
 
 
 def _resolve_event(job):
-    """Resolve the Event for a job via session or Run table."""
-    if job.session:
-        return job.session.event
-    run = Run.objects.filter(rdl_run_id=job.rdl_run_id).select_related("event").first()
-    if run:
-        return run.event
-    return None
+    return resolve_event_for_job(job)
 
 
 def compose_story(job_id: int):
@@ -74,6 +69,7 @@ def compose_story(job_id: int):
     viz_path = media_root / viz_piece.file.name
 
     event = _resolve_event(job)
+    organisation = resolve_organisation_for_job(job)
 
     audio_path = None
     if audio_piece and audio_piece.file:
@@ -99,6 +95,23 @@ def compose_story(job_id: int):
         last_event_t = max(evt["t"] for evt in scene_events)
         max_duration = last_event_t + 2.0
 
+    logo_path = None
+    logo_position_x = template.logo_position_x
+    logo_position_y = template.logo_position_y
+    logo_scale = template.logo_scale
+    if organisation and organisation.logo:
+        logo_path = Path(organisation.logo.path)
+        logo_position_x = organisation.logo_position_x
+        logo_position_y = organisation.logo_position_y
+        logo_scale = organisation.logo_scale
+        logger.info("Job #%d: using organisation logo from %s", job_id, organisation.code)
+    elif template.logo_path:
+        candidate = Path(template.logo_path)
+        if not candidate.is_absolute():
+            candidate = media_root / template.logo_path
+        if candidate.exists():
+            logo_path = candidate
+
     compose_story_video(
         viz_path=viz_path,
         output_path=output_path,
@@ -108,6 +121,10 @@ def compose_story(job_id: int):
         max_duration=max_duration,
         sfx_paths=sfx_paths,
         scene_events=scene_events,
+        logo_path=logo_path,
+        logo_position_x=logo_position_x,
+        logo_position_y=logo_position_y,
+        logo_scale=logo_scale,
     )
 
     file_size = output_path.stat().st_size

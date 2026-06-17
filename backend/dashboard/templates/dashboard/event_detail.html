@@ -4,7 +4,7 @@
 {% block content %}
 <hgroup>
     <h2>{{ event.name }}</h2>
-    <p>{{ event.event_type }} &middot; rdl_event_id={{ event.rdl_event_id }} &middot; {{ total_runs }} runs synced</p>
+    <p>{{ event.event_type }} &middot; <a href="{% url 'dashboard:organisation-detail' event.organisation.id %}">{{ event.organisation.name }}</a> &middot; rdl_event_id={{ event.rdl_event_id }} &middot; {{ total_runs }} runs synced</p>
 </hgroup>
 
 <section>

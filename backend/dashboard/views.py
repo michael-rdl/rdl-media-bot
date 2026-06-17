@@ -6,7 +6,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from pipeline.models import ContentTemplate, Driver, Event, Job, Run, Session, StreamSource
+from pipeline.models import ContentTemplate, Driver, Event, Job, Organisation, Run, Session, StreamSource
 from pipeline.rdl_client import api_get
 from pipeline.sync import sync_events_from_rdl
 
@@ -207,8 +207,12 @@ def test_generate(request, run_id):
 
 
 def event_list(request):
-    events = Event.objects.prefetch_related("sessions").all()
-    return render(request, "dashboard/event_list.html", {"events": events})
+    events = Event.objects.select_related("organisation").prefetch_related("sessions").all()
+    organisations = Organisation.objects.prefetch_related("events").all()
+    return render(request, "dashboard/event_list.html", {
+        "events": events,
+        "organisations": organisations,
+    })
 
 
 @require_POST
@@ -227,7 +231,7 @@ def event_sync(request):
 
 
 def event_detail(request, event_id):
-    event = get_object_or_404(Event, id=event_id)
+    event = get_object_or_404(Event.objects.select_related("organisation"), id=event_id)
     sessions = event.sessions.annotate(
         job_count=models.Count("jobs"),
         run_count=models.Count("runs"),
@@ -362,7 +366,13 @@ def event_create_highlight(request, event_id):
 
     try:
         from publish.instagram import InstagramHighlightManager
-        mgr = InstagramHighlightManager()
+        from publish.instagram_credentials import get_instagram_credentials
+
+        creds = get_instagram_credentials(event.organisation)
+        if not creds or creds.method != "instagrapi":
+            raise RuntimeError("Highlights require instagrapi credentials on the organisation")
+
+        mgr = InstagramHighlightManager(creds)
         # Need at least one story to create a highlight -- use a placeholder
         # For now, we'll create when the first story is published
         # Just store intent; actual creation deferred to first publish
@@ -420,6 +430,7 @@ def settings_view(request):
         "RDL Auth": rdl_auth,
         "Instagram Graph API": "Configured" if django_settings.INSTAGRAM_ACCESS_TOKEN else "Not configured",
         "Instagram Private API": "Configured" if django_settings.INSTAGRAM_USERNAME else "Not configured",
+        "Meta OAuth App": "Configured" if django_settings.META_APP_ID else "Not configured",
         "YouTube API": "Configured" if django_settings.YOUTUBE_OAUTH_TOKEN_FILE else "Not configured",
         "Webhook Secret": "Set" if django_settings.WEBHOOK_SECRET else "Not set",
     }
@@ -457,3 +468,187 @@ def _get_job_instagram_handles(job):
             handles.append(driver.instagram.lstrip("@"))
 
     return handles
+
+
+def organisation_list(request):
+    organisations = Organisation.objects.prefetch_related("events").all()
+    return render(request, "dashboard/organisation_list.html", {
+        "organisations": organisations,
+    })
+
+
+def organisation_detail(request, org_id):
+    org = get_object_or_404(Organisation.objects.prefetch_related("events"), id=org_id)
+    from publish.instagram_credentials import get_instagram_credentials
+    from publish.meta_oauth import meta_oauth_configured
+
+    ig_creds = get_instagram_credentials(org)
+    return render(request, "dashboard/organisation_detail.html", {
+        "organisation": org,
+        "events": org.events.all(),
+        "instagram_connected": bool(org.instagram_auth_method),
+        "instagram_credentials_source": "organisation" if org.instagram_auth_method else (
+            "environment" if ig_creds else "none"
+        ),
+        "meta_oauth_available": meta_oauth_configured(),
+    })
+
+
+@require_POST
+def organisation_update(request, org_id):
+    org = get_object_or_404(Organisation, id=org_id)
+
+    org.name = request.POST.get("name", org.name).strip()
+    org.code = request.POST.get("code", org.code).strip().upper()
+    org.instagram_handle = request.POST.get("instagram_handle", "").strip().lstrip("@")
+    org.rdl_base_url = request.POST.get("rdl_base_url", org.rdl_base_url).strip()
+    org.rdl_base_api_url = request.POST.get("rdl_base_api_url", org.rdl_base_api_url).strip()
+    org.rdl_internal_api_key = request.POST.get("rdl_internal_api_key", org.rdl_internal_api_key).strip()
+    org.rdl_api_username = request.POST.get("rdl_api_username", org.rdl_api_username).strip()
+    if request.POST.get("rdl_api_password"):
+        org.rdl_api_password = request.POST.get("rdl_api_password")
+    org.logo_position_x = float(request.POST.get("logo_position_x", org.logo_position_x))
+    org.logo_position_y = float(request.POST.get("logo_position_y", org.logo_position_y))
+    org.logo_scale = float(request.POST.get("logo_scale", org.logo_scale))
+
+    if request.POST.get("remove_logo"):
+        if org.logo:
+            org.logo.delete(save=False)
+            org.logo = ""
+    elif request.FILES.get("logo"):
+        if org.logo:
+            org.logo.delete(save=False)
+        org.logo = request.FILES["logo"]
+
+    org.save()
+    return redirect("dashboard:organisation-detail", org_id=org.id)
+
+
+@require_POST
+def organisation_instagram_connect(request, org_id):
+    org = get_object_or_404(Organisation, id=org_id)
+    from publish.instagram_credentials import save_graph_credentials, save_instagrapi_credentials, test_instagram_connection
+
+    method = request.POST.get("instagram_auth_method", "").strip()
+    if method == Organisation.InstagramAuthMethod.GRAPH:
+        user_id = request.POST.get("instagram_user_id", "").strip()
+        access_token = request.POST.get("instagram_access_token", "").strip()
+        if not user_id:
+            user_id = org.instagram_user_id
+        if not access_token:
+            access_token = org.instagram_access_token
+        if not user_id or not access_token:
+            request.session["instagram_message"] = "Graph API requires both User ID and Access Token."
+            return redirect("dashboard:organisation-detail", org_id=org.id)
+        save_graph_credentials(org, user_id=user_id, access_token=access_token)
+    elif method == Organisation.InstagramAuthMethod.INSTAGRAPI:
+        username = request.POST.get("instagram_username", "").strip().lstrip("@")
+        password = request.POST.get("instagram_password", "")
+        if not username:
+            username = org.instagram_username
+        if not password:
+            password = org.instagram_password
+        if not username or not password:
+            request.session["instagram_message"] = "Instagrapi requires username and password."
+            return redirect("dashboard:organisation-detail", org_id=org.id)
+        save_instagrapi_credentials(org, username=username, password=password)
+    else:
+        request.session["instagram_message"] = "Select a connection method."
+        return redirect("dashboard:organisation-detail", org_id=org.id)
+
+    result = test_instagram_connection(org)
+    request.session["instagram_message"] = result["message"]
+    return redirect("dashboard:organisation-detail", org_id=org.id)
+
+
+@require_POST
+def organisation_instagram_test(request, org_id):
+    org = get_object_or_404(Organisation, id=org_id)
+    from publish.instagram_credentials import test_instagram_connection
+
+    result = test_instagram_connection(org)
+    request.session["instagram_message"] = result["message"]
+    if result.get("account"):
+        acct = result["account"]
+        extras = []
+        if acct.get("followers_count") is not None:
+            extras.append(f"{acct['followers_count']:,} followers")
+        if acct.get("media_count") is not None:
+            extras.append(f"{acct['media_count']:,} posts")
+        if extras:
+            request.session["instagram_message"] += f" ({', '.join(extras)})"
+    return redirect("dashboard:organisation-detail", org_id=org.id)
+
+
+@require_POST
+def organisation_instagram_disconnect(request, org_id):
+    org = get_object_or_404(Organisation, id=org_id)
+    from publish.instagram_credentials import clear_instagram_credentials
+
+    clear_instagram_credentials(org)
+    request.session["instagram_message"] = "Instagram account disconnected."
+    return redirect("dashboard:organisation-detail", org_id=org.id)
+
+
+def instagram_oauth_start(request, org_id):
+    org = get_object_or_404(Organisation, id=org_id)
+    from publish.meta_oauth import build_oauth_url, meta_oauth_configured
+
+    if not meta_oauth_configured():
+        request.session["instagram_message"] = "Meta OAuth is not configured (set META_APP_ID and META_APP_SECRET)."
+        return redirect("dashboard:organisation-detail", org_id=org.id)
+
+    redirect_uri = request.build_absolute_uri(
+        f"/organisations/{org.id}/instagram/oauth/callback/"
+    )
+    return redirect(build_oauth_url(org.id, redirect_uri))
+
+
+def instagram_oauth_callback(request, org_id):
+    org = get_object_or_404(Organisation, id=org_id)
+    from publish.meta_oauth import connect_organisation_via_oauth, meta_oauth_configured
+
+    error = request.GET.get("error_description") or request.GET.get("error")
+    if error:
+        request.session["instagram_message"] = f"OAuth failed: {error}"
+        return redirect("dashboard:organisation-detail", org_id=org.id)
+
+    code = request.GET.get("code")
+    if not code:
+        request.session["instagram_message"] = "OAuth failed: no authorization code received."
+        return redirect("dashboard:organisation-detail", org_id=org.id)
+
+    if not meta_oauth_configured():
+        request.session["instagram_message"] = "Meta OAuth is not configured."
+        return redirect("dashboard:organisation-detail", org_id=org.id)
+
+    redirect_uri = request.build_absolute_uri(
+        f"/organisations/{org.id}/instagram/oauth/callback/"
+    )
+    try:
+        result = connect_organisation_via_oauth(org, code, redirect_uri)
+        request.session["instagram_message"] = (
+            f"Connected via Meta OAuth as @{result['username']} (ID {result['user_id']})"
+        )
+    except Exception as exc:
+        logger.exception("Instagram OAuth callback failed for org %d", org.id)
+        request.session["instagram_message"] = f"OAuth failed: {exc}"
+
+    return redirect("dashboard:organisation-detail", org_id=org.id)
+
+
+@require_POST
+def organisation_sync(request, org_id):
+    org = get_object_or_404(Organisation, id=org_id)
+    counts = sync_events_from_rdl(organisation=org)
+    msg = (
+        f"{org.name}: {counts['events_created']} events created, "
+        f"{counts['events_updated']} updated. "
+        f"{counts['sessions_created']} sessions created, "
+        f"{counts['sessions_updated']} updated. "
+        f"{counts['runs_synced']} runs synced."
+    )
+    if counts["errors"]:
+        msg += f" Errors: {'; '.join(counts['errors'])}"
+    request.session["sync_message"] = msg
+    return redirect("dashboard:organisation-detail", org_id=org.id)

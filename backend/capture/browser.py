@@ -58,6 +58,9 @@ def capture_replay(
     run_id: int,
     output_path: Path,
     duration_seconds: float,
+    base_url: str | None = None,
+    api_username: str = "",
+    api_password: str = "",
     on_progress=None,
 ):
     """
@@ -78,7 +81,7 @@ def capture_replay(
         if on_progress:
             on_progress(msg)
 
-    base_url = settings.RDL_BASE_URL.rstrip("/")
+    base_url = (base_url or settings.RDL_BASE_URL).rstrip("/")
     replay_url = f"{base_url}/video-out/{run_id}"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -97,7 +100,7 @@ def capture_replay(
         page = context.new_page()
 
         _progress("Authenticating...")
-        _authenticate(page, base_url)
+        _authenticate(page, base_url, api_username, api_password)
 
         _progress("Loading scene...")
         page.goto(replay_url, wait_until="domcontentloaded", timeout=60_000)
@@ -242,9 +245,9 @@ def _stitch_frames(frames_dir: Path, output_path: Path, fps: float):
         raise RuntimeError(f"ffmpeg stitch failed: {result.stderr[:500]}")
 
 
-def _authenticate(page, base_url):
-    email = getattr(settings, "RDL_API_USERNAME", "")
-    password = getattr(settings, "RDL_API_PASSWORD", "")
+def _authenticate(page, base_url, api_username="", api_password=""):
+    email = api_username or getattr(settings, "RDL_API_USERNAME", "")
+    password = api_password or getattr(settings, "RDL_API_PASSWORD", "")
 
     if not email:
         return

@@ -86,7 +86,7 @@ def poll_live_sessions():
     """
     from .rdl_client import api_get
 
-    live_sessions = Session.objects.filter(is_live=True).select_related("event")
+    live_sessions = Session.objects.filter(is_live=True).select_related("event__organisation")
     if not live_sessions.exists():
         return
 
@@ -105,24 +105,26 @@ def poll_live_sessions():
             continue
 
         event_id = session.event.rdl_event_id
+        organisation = session.event.organisation
 
         # Fetch runs for this event (cached per event to avoid duplicate API calls)
-        if event_id not in polled_events:
+        cache_key = (organisation.id, event_id)
+        if cache_key not in polled_events:
             try:
-                resp = api_get("/run/")
+                resp = api_get("/run/", organisation=organisation)
                 if resp.status_code != 200:
                     logger.error("poll_live_sessions: GET /run/ returned %d", resp.status_code)
                     continue
                 data = resp.json()
                 all_runs = data if isinstance(data, list) else data.get("results", [])
-                polled_events[event_id] = [
+                polled_events[cache_key] = [
                     r for r in all_runs if r.get("event_id") == event_id
                 ]
             except Exception as exc:
                 logger.exception("poll_live_sessions: failed to fetch runs: %s", exc)
                 continue
 
-        runs = polled_events.get(event_id, [])
+        runs = polled_events.get(cache_key, [])
         if not runs:
             continue
 

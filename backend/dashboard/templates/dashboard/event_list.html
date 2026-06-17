@@ -4,14 +4,15 @@
 {% block content %}
 <hgroup>
     <h2>Events</h2>
-    <p>Events and sessions synced from rdl-base</p>
+    <p>Events and sessions synced from rdl-base, grouped by organisation</p>
 </hgroup>
 
 <div style="margin-bottom: 2rem;">
     <form method="post" action="{% url 'dashboard:event-sync' %}" style="display: inline;">
         {% csrf_token %}
-        <button type="submit">Sync Events / Sessions</button>
+        <button type="submit">Sync All Organisations</button>
     </form>
+    <a href="{% url 'dashboard:organisation-list' %}" role="button" class="secondary">Manage Organisations</a>
 </div>
 
 {% if request.session.sync_message %}
@@ -24,6 +25,7 @@
     <thead>
         <tr>
             <th>Event</th>
+            <th>Organisation</th>
             <th>Type</th>
             <th>Sessions</th>
             <th>Highlight</th>
@@ -35,6 +37,7 @@
         {% for event in events %}
         <tr>
             <td><a href="{% url 'dashboard:event-detail' event.id %}">{{ event.name }}</a></td>
+            <td><a href="{% url 'dashboard:organisation-detail' event.organisation.id %}">{{ event.organisation.name }}</a></td>
             <td>{{ event.event_type }}</td>
             <td>{{ event.sessions.count }}</td>
             <td>

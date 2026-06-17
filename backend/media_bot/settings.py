@@ -120,6 +120,10 @@ INSTAGRAM_ACCESS_TOKEN = os.environ.get("INSTAGRAM_ACCESS_TOKEN", "")
 INSTAGRAM_USERNAME = os.environ.get("INSTAGRAM_USERNAME", "")
 INSTAGRAM_PASSWORD = os.environ.get("INSTAGRAM_PASSWORD", "")
 
+# Meta OAuth (for connecting Instagram Business accounts via dashboard)
+META_APP_ID = os.environ.get("META_APP_ID", "")
+META_APP_SECRET = os.environ.get("META_APP_SECRET", "")
+
 # --- YouTube ---
 YOUTUBE_CLIENT_SECRETS_FILE = os.environ.get("YOUTUBE_CLIENT_SECRETS_FILE", "")
 YOUTUBE_OAUTH_TOKEN_FILE = os.environ.get("YOUTUBE_OAUTH_TOKEN_FILE", "")

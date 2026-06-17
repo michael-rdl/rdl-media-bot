@@ -1,0 +1,40 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Organisations - RDL Media Bot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Organisations</h2>
+    <p>Each organisation connects to its own rdl-base server and owns a set of events</p>
+</hgroup>
+
+{% if organisations %}
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Code</th>
+            <th>Instagram</th>
+            <th>Server</th>
+            <th>Events</th>
+            <th>Logo</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for org in organisations %}
+        <tr>
+            <td><a href="{% url 'dashboard:organisation-detail' org.id %}">{{ org.name }}</a></td>
+            <td><code>{{ org.code }}</code></td>
+            <td>{% if org.instagram_account_name %}@{{ org.instagram_account_name }}{% elif org.instagram_handle %}@{{ org.instagram_handle }}{% else %}&mdash;{% endif %}</td>
+            <td><code>{{ org.rdl_base_url }}</code></td>
+            <td>{{ org.events.count }}</td>
+            <td>{% if org.logo %}Yes{% else %}&mdash;{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p>No organisations configured yet. Create one in <a href="/admin/pipeline/organisation/add/">Django Admin</a>.</p>
+{% endif %}
+{% endblock %}

@@ -61,23 +61,63 @@ class PublishResultAdmin(admin.ModelAdmin):
     list_filter = ("platform", "status")
 
 
-@admin.register(Organisation)
-class OrganisationAdmin(admin.ModelAdmin):
-    list_display = ("name", "updated_at")
-    search_fields = ("name",)
-
-
 class SessionInline(admin.TabularInline):
     model = Session
     extra = 0
     readonly_fields = ("rdl_session_id", "is_live", "last_run_seen_at", "last_polled_run_id")
 
 
+class EventInline(admin.TabularInline):
+    model = Event
+    extra = 0
+    readonly_fields = ("rdl_event_id", "event_type", "created_at")
+    show_change_link = True
+
+
+@admin.register(Organisation)
+class OrganisationAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "instagram_handle", "rdl_base_url", "updated_at")
+    search_fields = ("name", "code", "instagram_handle")
+    readonly_fields = ("created_at", "updated_at")
+    inlines = [EventInline]
+    fieldsets = (
+        (None, {
+            "fields": ("name", "code", "instagram_handle"),
+        }),
+        ("rdl-base Server", {
+            "fields": (
+                "rdl_base_url",
+                "rdl_base_api_url",
+                "rdl_internal_api_key",
+                "rdl_api_username",
+                "rdl_api_password",
+            ),
+        }),
+        ("Media Branding", {
+            "fields": ("logo", "logo_position_x", "logo_position_y", "logo_scale"),
+        }),
+        ("Instagram Publishing", {
+            "fields": (
+                "instagram_auth_method",
+                "instagram_user_id",
+                "instagram_access_token",
+                "instagram_username",
+                "instagram_password",
+                "instagram_account_name",
+                "instagram_connected_at",
+            ),
+        }),
+        ("Timestamps", {
+            "fields": ("created_at", "updated_at"),
+        }),
+    )
+
+
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
-    list_display = ("name", "event_type", "rdl_event_id", "ig_highlight_pk", "created_at")
-    search_fields = ("name",)
-    list_filter = ("event_type",)
+    list_display = ("name", "organisation", "event_type", "rdl_event_id", "ig_highlight_pk", "created_at")
+    search_fields = ("name", "organisation__name")
+    list_filter = ("organisation", "event_type")
     inlines = [SessionInline]
 
 

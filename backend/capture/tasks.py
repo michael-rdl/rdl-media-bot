@@ -5,7 +5,8 @@ from pathlib import Path
 from django.conf import settings
 
 from pipeline.models import ContentPiece, Job
-from pipeline.rdl_client import api_get
+from pipeline.rdl_client import api_get, get_config
+from pipeline.utils import resolve_organisation_for_job
 
 from .browser import capture_replay
 
@@ -25,8 +26,9 @@ def capture_visualiser(job_id: int):
         _db_pool.submit(Job.objects.filter(id=job_id).update, status_message=msg)
 
     _update_progress("Fetching run metadata...")
-    run_data = _fetch_run_metadata(job.rdl_run_id)
-    _enrich_driver_instagram(run_data)
+    organisation = resolve_organisation_for_job(job)
+    run_data = _fetch_run_metadata(job.rdl_run_id, organisation)
+    _enrich_driver_instagram(run_data, organisation)
     job.run_metadata = run_data
     job.save(update_fields=["run_metadata"])
 
@@ -38,8 +40,15 @@ def capture_visualiser(job_id: int):
     job_dir.mkdir(parents=True, exist_ok=True)
     output_path = job_dir / "viz_capture.mp4"
 
+    config = get_config(organisation)
     _output_path, scene_events = capture_replay(
-        job.rdl_run_id, output_path, duration, on_progress=_update_progress,
+        job.rdl_run_id,
+        output_path,
+        duration,
+        base_url=config.base_url,
+        api_username=config.api_username,
+        api_password=config.api_password,
+        on_progress=_update_progress,
     )
 
     file_size = output_path.stat().st_size
@@ -66,13 +75,13 @@ def capture_visualiser(job_id: int):
     )
 
 
-def _fetch_run_metadata(run_id: int) -> dict:
-    resp = api_get(f"/run/{run_id}/")
+def _fetch_run_metadata(run_id: int, organisation=None) -> dict:
+    resp = api_get(f"/run/{run_id}/", organisation=organisation)
     resp.raise_for_status()
     return resp.json()
 
 
-def _enrich_driver_instagram(run_data: dict):
+def _enrich_driver_instagram(run_data: dict, organisation=None):
     """Fetch instagram handles for drivers via the driver API."""
     for side in ("left_run_data", "right_run_data"):
         rd = run_data.get(side)
@@ -83,7 +92,7 @@ def _enrich_driver_instagram(run_data: dict):
         if not driver_id:
             continue
         try:
-            resp = api_get(f"/driver/{driver_id}/")
+            resp = api_get(f"/driver/{driver_id}/", organisation=organisation)
             if resp.status_code == 200:
                 driver_detail = resp.json()
                 ig_url = driver_detail.get("instagram_url", "")
