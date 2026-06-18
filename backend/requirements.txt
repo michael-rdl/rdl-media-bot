@@ -20,6 +20,7 @@ yt-dlp>=2024.1
 # Instagram publishing
 instagrapi>=2.8
 requests>=2.31
+python-dotenv>=1.0
 
 # YouTube publishing
 google-api-python-client>=2.100

@@ -3,6 +3,13 @@ export PATH="/opt/homebrew/bin:/opt/homebrew/opt/python@3.11/libexec/bin:/usr/lo
 
 cd "$(dirname "$0")"
 
+if [ -f ".env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+fi
+
 # Create venv if missing
 if [ ! -d "venv" ]; then
     python3.11 -m venv venv
