@@ -5,6 +5,8 @@ from typing import Optional
 
 from .base import ContentSource
 
+from pipeline.media_tools import ffmpeg_bin
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,7 +57,7 @@ class YouTubeSource(ContentSource):
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         cmd = [
-            "ffmpeg", "-y",
+            ffmpeg_bin(), "-y",
             "-i", str(video_path),
             "-vn",
             "-acodec", "aac",

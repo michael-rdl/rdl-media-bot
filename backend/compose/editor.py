@@ -4,6 +4,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from pipeline.media_tools import ffmpeg_bin, ffprobe_bin
+
 logger = logging.getLogger(__name__)
 
 EVENT_TYPE_TO_SFX = {
@@ -102,7 +104,7 @@ def _compose_video_only(
     if has_logo:
         vf = _video_scale_filter(width, height, fade_start)
         vf += ";" + _logo_overlay_filter(width, height, logo_position_x, logo_position_y, logo_scale)
-        cmd = ["ffmpeg", "-y", "-i", str(viz_path), "-i", str(logo_path)]
+        cmd = [ffmpeg_bin(), "-y", "-i", str(viz_path), "-i", str(logo_path)]
         if max_duration > 0:
             cmd.extend(["-t", str(max_duration)])
         cmd.extend(["-filter_complex", vf, "-map", "[vout]", "-an"])
@@ -112,7 +114,7 @@ def _compose_video_only(
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,"
             f"fade=t=out:st={fade_start:.2f}:d=1:color=black"
         )
-        cmd = ["ffmpeg", "-y", "-i", str(viz_path)]
+        cmd = [ffmpeg_bin(), "-y", "-i", str(viz_path)]
         if max_duration > 0:
             cmd.extend(["-t", str(max_duration)])
         cmd.extend(["-vf", vf, "-an"])
@@ -129,7 +131,7 @@ def _compose_bg_audio_only(
     has_logo = logo_path and logo_path.exists()
     audio_input_idx = 2 if has_logo else 1
 
-    cmd = ["ffmpeg", "-y", "-i", str(viz_path)]
+    cmd = [ffmpeg_bin(), "-y", "-i", str(viz_path)]
     if has_logo:
         cmd.extend(["-i", str(logo_path)])
     cmd.extend(["-i", str(bg_audio_path)])
@@ -187,7 +189,7 @@ def _compose_with_audio(
             unique_sfx[path] = next_idx
             next_idx += 1
 
-    cmd = ["ffmpeg", "-y", "-i", str(viz_path)]
+    cmd = [ffmpeg_bin(), "-y", "-i", str(viz_path)]
     if has_logo:
         cmd.extend(["-i", str(logo_path)])
     for path in unique_sfx:
@@ -270,7 +272,7 @@ def _run_ffmpeg(cmd, output_path, label):
 def _get_video_duration(path: Path) -> float:
     """Get video duration in seconds via ffprobe."""
     cmd = [
-        "ffprobe", "-v", "quiet",
+        ffprobe_bin(), "-v", "quiet",
         "-print_format", "json",
         "-show_streams",
         str(path),

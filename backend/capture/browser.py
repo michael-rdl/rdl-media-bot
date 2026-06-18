@@ -5,6 +5,8 @@ from pathlib import Path
 
 from django.conf import settings
 
+from pipeline.media_tools import ffmpeg_bin
+
 logger = logging.getLogger(__name__)
 
 VIEWPORT = {"width": 1080, "height": 1920}
@@ -229,7 +231,7 @@ def capture_replay(
 def _stitch_frames(frames_dir: Path, output_path: Path, fps: float):
     """Stitch JPEG screenshots into an MP4 video with a 0.5s freeze on the first frame."""
     cmd = [
-        "ffmpeg", "-y",
+        ffmpeg_bin(), "-y",
         "-framerate", str(fps),
         "-i", str(frames_dir / "frame_%05d.jpg"),
         "-vf", "tpad=start_duration=0.5:start_mode=clone",

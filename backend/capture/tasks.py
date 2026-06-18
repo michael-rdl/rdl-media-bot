@@ -140,8 +140,10 @@ def _probe_video(path: Path) -> dict:
     import subprocess
     import json as json_mod
 
+    from pipeline.media_tools import ffprobe_bin
+
     cmd = [
-        "ffprobe", "-v", "quiet",
+        ffprobe_bin(), "-v", "quiet",
         "-print_format", "json",
         "-show_streams",
         str(path),
