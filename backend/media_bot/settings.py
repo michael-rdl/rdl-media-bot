@@ -22,7 +22,9 @@ CSRF_TRUSTED_ORIGINS = os.environ.get(
     "https://dev01.ngrok.io,https://*.ngrok.io,http://rdldev01.local",
 ).split(",")
 
-INSTALLED_APPS = [
+# ngrok terminates TLS; Django sees HTTP unless these are set
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
