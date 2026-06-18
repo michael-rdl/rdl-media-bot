@@ -8,7 +8,7 @@ gunicorn>=21.2
 
 # Media processing
 ffmpeg-python>=0.2
-moviepy>=1.0
+moviepy==2.2.1
 Pillow>=10.0
 
 # Browser automation
