@@ -115,7 +115,10 @@ def _publish_instagram_private(job, story_piece, video_path, caption, ig_handles
     replay_url = f"{config.base_url}/review/{job.rdl_run_id}"
 
     try:
-        publisher = InstagrapiPublisher(credentials)
+        publisher = InstagrapiPublisher(
+            credentials,
+            organisation_id=organisation.id if organisation else None,
+        )
         result = publisher.publish(
             video_path, caption,
             media_type=media_type,
@@ -190,7 +193,10 @@ def _add_to_event_highlight(job, story_post_id: str, credentials=None):
 
     try:
         from .instagram import InstagramHighlightManager
-        mgr = InstagramHighlightManager(credentials)
+        mgr = InstagramHighlightManager(
+            credentials,
+            organisation_id=event.organisation_id,
+        )
 
         if event.ig_highlight_pk == "pending":
             result = mgr.create_highlight(
@@ -295,7 +301,10 @@ def _maybe_publish_ad(job, story_piece):
         ig_creds = get_instagram_credentials(organisation)
         if ig_creds and ig_creds.method == "instagrapi":
             from .instagram import InstagrapiPublisher
-            publisher = InstagrapiPublisher(ig_creds)
+            publisher = InstagrapiPublisher(
+                ig_creds,
+                organisation_id=organisation.id if organisation else None,
+            )
             result = publisher.publish(
                 ad_path, caption,
                 media_type="STORIES",

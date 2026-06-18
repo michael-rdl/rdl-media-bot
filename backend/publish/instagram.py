@@ -132,16 +132,41 @@ class InstagrapiPublisher(ContentPublisher):
     More flexible for Stories -- supports mentions, links, hashtags.
     """
 
-    def __init__(self, credentials: InstagramCredentials | None = None):
+    def __init__(self, credentials: InstagramCredentials | None = None, organisation_id: int | None = None):
         if credentials and credentials.method == "instagrapi":
             self.username = credentials.username
             self.password = credentials.password
+            self._credentials = credentials
         else:
             self.username = settings.INSTAGRAM_USERNAME
             self.password = settings.INSTAGRAM_PASSWORD
+            self._credentials = InstagramCredentials(
+                method="instagrapi",
+                username=self.username,
+                password=self.password,
+            ) if self.username and self.password else None
 
         if not self.username or not self.password:
             raise RuntimeError("Instagram credentials not configured for instagrapi")
+
+        self.organisation_id = organisation_id
+
+    def _get_client(self):
+        from publish.instagrapi_client import clear_instagrapi_session, get_instagrapi_client, is_login_required_error
+
+        try:
+            return get_instagrapi_client(
+                self._credentials,
+                organisation_id=self.organisation_id,
+            )
+        except Exception as exc:
+            if is_login_required_error(exc):
+                clear_instagrapi_session(self.organisation_id)
+                raise RuntimeError(
+                    "Instagram session expired. Open the Instagram app, approve the login "
+                    "if prompted, then click Test Connection on the organisation page and retry."
+                ) from exc
+            raise
 
     def publish(
         self,
@@ -155,11 +180,10 @@ class InstagrapiPublisher(ContentPublisher):
         link_url: Optional[str] = None,
         **kwargs,
     ) -> dict:
-        from instagrapi import Client
         from instagrapi.types import StoryLink, StoryMention
+        from publish.instagrapi_client import clear_instagrapi_session, is_login_required_error
 
-        cl = Client()
-        cl.login(self.username, self.password)
+        cl = self._get_client()
 
         story_mentions = []
         if mentions:
@@ -185,12 +209,22 @@ class InstagrapiPublisher(ContentPublisher):
             ))
 
         if media_type == "STORIES":
-            result = cl.video_upload_to_story(
-                video_path,
-                caption,
-                mentions=story_mentions,
-                links=story_links,
-            )
+            try:
+                result = cl.video_upload_to_story(
+                    video_path,
+                    caption,
+                    mentions=story_mentions,
+                    links=story_links,
+                )
+            except Exception as exc:
+                if is_login_required_error(exc):
+                    clear_instagrapi_session(self.organisation_id)
+                    raise RuntimeError(
+                        "Instagram rejected the upload (login_required). Open the Instagram app, "
+                        "tap 'This was me' on the security alert, click Test Connection on the "
+                        "organisation page, then retry the job."
+                    ) from exc
+                raise
         elif media_type == "REELS":
             result = cl.clip_upload(video_path, caption)
         else:
@@ -208,24 +242,32 @@ class InstagramHighlightManager:
     Not wired into the publish pipeline -- call directly when needed.
     """
 
-    def __init__(self, credentials: InstagramCredentials | None = None):
+    def __init__(self, credentials: InstagramCredentials | None = None, organisation_id: int | None = None):
         if credentials and credentials.method == "instagrapi":
             self.username = credentials.username
             self.password = credentials.password
+            self._credentials = credentials
         else:
             self.username = settings.INSTAGRAM_USERNAME
             self.password = settings.INSTAGRAM_PASSWORD
+            self._credentials = InstagramCredentials(
+                method="instagrapi",
+                username=self.username,
+                password=self.password,
+            ) if self.username and self.password else None
 
         if not self.username or not self.password:
             raise RuntimeError("Instagram credentials not configured for highlights")
-        self._credentials = credentials
+
+        self.organisation_id = organisation_id
 
     def _get_client(self):
-        from instagrapi import Client
+        from publish.instagrapi_client import get_instagrapi_client
 
-        cl = Client()
-        cl.login(self.username, self.password)
-        return cl
+        return get_instagrapi_client(
+            self._credentials,
+            organisation_id=self.organisation_id,
+        )
 
     def create_highlight(
         self,

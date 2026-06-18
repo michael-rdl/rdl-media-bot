@@ -82,7 +82,8 @@ def test_instagram_connection(organisation: Organisation | None = None) -> dict:
         if creds.method == "graph":
             account = _test_graph_connection(creds)
         else:
-            account = _test_instagrapi_connection(creds)
+            org_id = organisation.id if organisation else None
+            account = _test_instagrapi_connection(creds, organisation_id=org_id)
     except Exception as exc:
         logger.exception("Instagram connection test failed")
         return {"ok": False, "message": str(exc), "account": None}
@@ -122,11 +123,10 @@ def _test_graph_connection(creds: InstagramCredentials) -> dict:
     }
 
 
-def _test_instagrapi_connection(creds: InstagramCredentials) -> dict:
-    from instagrapi import Client
+def _test_instagrapi_connection(creds: InstagramCredentials, organisation_id: int | None = None) -> dict:
+    from publish.instagrapi_client import get_instagrapi_client
 
-    cl = Client()
-    cl.login(creds.username, creds.password)
+    cl = get_instagrapi_client(creds, organisation_id=organisation_id)
     user = cl.account_info()
     return {
         "method": "instagrapi",
@@ -173,6 +173,9 @@ def save_instagrapi_credentials(
 
 
 def clear_instagram_credentials(organisation: Organisation) -> None:
+    from publish.instagrapi_client import clear_instagrapi_session
+
+    clear_instagrapi_session(organisation.id)
     organisation.instagram_auth_method = ""
     organisation.instagram_user_id = ""
     organisation.instagram_access_token = ""

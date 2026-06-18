@@ -372,7 +372,7 @@ def event_create_highlight(request, event_id):
         if not creds or creds.method != "instagrapi":
             raise RuntimeError("Highlights require instagrapi credentials on the organisation")
 
-        mgr = InstagramHighlightManager(creds)
+        mgr = InstagramHighlightManager(creds, organisation_id=event.organisation_id)
         # Need at least one story to create a highlight -- use a placeholder
         # For now, we'll create when the first story is published
         # Just store intent; actual creation deferred to first publish
